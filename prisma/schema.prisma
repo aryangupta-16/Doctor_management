@@ -1,0 +1,518 @@
+// This is your Prisma schema file for PostgreSQL database
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// ENUMS
+// ============================================
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+enum RoleType {
+  ADMIN
+  PATIENT
+  DOCTOR
+  SUPPORT
+}
+
+enum SlotStatus {
+  AVAILABLE
+  RESERVED
+  BOOKED
+  COMPLETED
+  CANCELLED
+}
+
+enum ConsultationStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum ConsultationType {
+  VIDEO
+  AUDIO
+  CHAT
+  IN_PERSON
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum PaymentMethod {
+  CREDIT_CARD
+  DEBIT_CARD
+  UPI
+  NET_BANKING
+  WALLET
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  LOGOUT
+  ACCESS
+  EXPORT
+}
+
+enum NotificationType {
+  EMAIL
+  SMS
+  PUSH
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
+// ============================================
+// USER MANAGEMENT
+// ============================================
+
+model User {
+  id                String        @id @default(uuid())
+  email             String        @unique
+  phoneNumber       String?       @unique
+  passwordHash      String
+  firstName         String
+  lastName          String
+  dateOfBirth       DateTime?
+  gender            Gender?
+  profilePicture    String?
+  emailVerified     Boolean       @default(false)
+  phoneVerified     Boolean       @default(false)
+  isActive          Boolean       @default(true)
+  lastLoginAt       DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  
+  // Relations
+  profile           UserProfile?
+  role              RoleType
+  sessions          UserSession[]
+  doctor            Doctor?
+  consultationsAsPatient  Consultation[]  @relation("PatientConsultations")
+  bookedSlots       AvailabilitySlot[]  @relation("PatientBookings")
+  payments          Payment[]
+  notifications     Notification[]
+  reviews           Review[]
+  auditLogs         AuditLog[]
+  
+  @@index([email])
+  @@index([phoneNumber])
+  @@index([isActive])
+  @@map("users")
+}
+
+model UserProfile {
+  id                String   @id @default(uuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Address
+  addressLine1      String?
+  addressLine2      String?
+  city              String?
+  state             String?
+  pincode           String?
+  country           String?  @default("India")
+  
+  // Medical Information
+  bloodGroup        String?
+  height            Float?   // in cm
+  weight            Float?   // in kg
+  allergies         Json?    // Array of allergy objects
+  chronicConditions Json?    // Array of condition objects
+  currentMedications Json?   // Array of medication objects
+  
+  // Emergency Contact
+  emergencyContactName   String?
+  emergencyContactPhone  String?
+  emergencyContactRelation String?
+  
+  // Preferences
+  preferredLanguage      String?  @default("English")
+  notificationPreferences Json?   // Email, SMS, Push preferences
+  
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  
+  @@map("user_profiles")
+}
+
+model UserSession {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token        String   @unique
+  refreshToken String?  @unique
+  deviceInfo   Json?    // Browser, OS, IP address
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  
+  @@index([userId])
+  @@index([token])
+  @@map("user_sessions")
+}
+
+// ============================================
+// DOCTOR MANAGEMENT
+// ============================================
+
+model Doctor {
+  id                      String    @id @default(uuid())
+  userId                  String    @unique
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  // Professional Information
+  licenseNumber           String    @unique
+  specialtyPrimary        String
+  specialtiesSecondary    Json?     // Array of additional specialties
+  yearsOfExperience       Int
+  
+  // Education & Certifications
+  education               Json?     // Array of education objects
+  certifications          Json?     // Array of certification objects
+  
+  // Practice Information
+  bio                     String?   @db.Text
+  consultationFee         Decimal   @db.Decimal(10, 2)
+  consultationDuration    Int       @default(30)  // in minutes
+  languagesSpoken         Json?     // Array of languages
+  
+  // Verification & Status
+  isVerified              Boolean   @default(false)
+  verifiedAt              DateTime?
+  verifiedBy              String?   // Admin user ID
+  isActive                Boolean   @default(true)
+  
+  // Statistics
+  averageRating           Decimal?  @db.Decimal(3, 2)
+  totalConsultations      Int       @default(0)
+  totalReviews            Int       @default(0)
+  
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+  
+  // Relations
+  availability            DoctorAvailability[]
+  slots                   AvailabilitySlot[]
+  consultations           Consultation[]
+  prescriptions           Prescription[]
+  reviews                 Review[]
+  
+  @@index([specialtyPrimary])
+  @@index([isActive, isVerified])
+  @@index([averageRating])
+  @@map("doctors")
+}
+
+model DoctorAvailability {
+  id              String   @id @default(uuid())
+  doctorId        String
+  doctor          Doctor   @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  
+  dayOfWeek       Int      // 0=Sunday, 1=Monday, ..., 6=Saturday
+  startTime       String   // Format: "09:00"
+  endTime         String   // Format: "17:00"
+  isActive        Boolean  @default(true)
+  
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([doctorId])
+  @@map("doctor_availability")
+}
+
+// ============================================
+// BOOKING & SCHEDULING
+// ============================================
+
+model AvailabilitySlot {
+  id                  String       @id @default(uuid())
+  doctorId            String
+  doctor              Doctor       @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  
+  slotStartTime       DateTime
+  slotEndTime         DateTime
+  status              SlotStatus   @default(AVAILABLE)
+  
+  // Reservation Management (5-minute hold)
+  reservedByUserId    String?
+  reservedByUser      User?        @relation("PatientBookings", fields: [reservedByUserId], references: [id])
+  reservedAt          DateTime?
+  expiresAt           DateTime?
+  
+  // Booking Details
+  consultationId      String?      @unique
+  consultation        Consultation?
+  
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  
+  @@index([doctorId, slotStartTime])
+  @@index([status])
+  @@index([reservedByUserId])
+  @@map("availability_slots")
+}
+
+// ============================================
+// CONSULTATION MANAGEMENT
+// ============================================
+
+model Consultation {
+  id                    String              @id @default(uuid())
+  consultationNumber    String              @unique  // CONS20241111001
+  
+  // Participants
+  patientId             String
+  patient               User                @relation("PatientConsultations", fields: [patientId], references: [id])
+  doctorId              String
+  doctor                Doctor              @relation(fields: [doctorId], references: [id])
+  
+  // Slot Reference
+  slotId                String              @unique
+  slot                  AvailabilitySlot    @relation(fields: [slotId], references: [id])
+  
+  // Scheduling
+  scheduledStartTime    DateTime
+  scheduledEndTime      DateTime
+  actualStartTime       DateTime?
+  actualEndTime         DateTime?
+  
+  // Consultation Details
+  consultationType      ConsultationType    @default(VIDEO)
+  status                ConsultationStatus  @default(SCHEDULED)
+  consultationFee       Decimal             @db.Decimal(10, 2)
+  
+  // Clinical Information
+  chiefComplaint        String?             @db.Text
+  symptoms              Json?               // Array of symptoms
+  diagnosis             String?             @db.Text
+  doctorNotes           String?             @db.Text
+  followUpRequired      Boolean             @default(false)
+  followUpDate          DateTime?
+  
+  // Media & Documents
+  meetingLink           String?
+  recordingUrl          String?
+  attachments           Json?               // Array of file URLs
+  
+  // Ratings
+  patientRating         Int?                // 1-5
+  patientFeedback       String?             @db.Text
+  
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+  
+  // Relations
+  payment               Payment?
+  prescriptions         Prescription[]
+  review                Review?
+  
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([status])
+  @@index([scheduledStartTime])
+  @@map("consultations")
+}
+
+model Prescription {
+  id                String       @id @default(uuid())
+  prescriptionNumber String      @unique  // RX20241111001
+  
+  consultationId    String
+  consultation      Consultation @relation(fields: [consultationId], references: [id])
+  doctorId          String
+  doctor            Doctor       @relation(fields: [doctorId], references: [id])
+  
+  // Prescription Details
+  medications       Json         // Array of medication objects with dosage
+  instructions      String?      @db.Text
+  validUntil        DateTime?
+  
+  // Digital Signature
+  digitalSignature  String?
+  signedAt          DateTime?
+  
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  
+  @@index([consultationId])
+  @@index([doctorId])
+  @@map("prescriptions")
+}
+
+// ============================================
+// PAYMENT MANAGEMENT
+// ============================================
+
+model Payment {
+  id                    String        @id @default(uuid())
+  transactionNumber     String        @unique  // PAY20241111001
+  
+  // Payment Details
+  patientId             String
+  patient               User          @relation(fields: [patientId], references: [id])
+  consultationId        String?       @unique
+  consultation          Consultation? @relation(fields: [consultationId], references: [id])
+  
+  amount                Decimal       @db.Decimal(10, 2)
+  currency              String        @default("INR")
+  paymentMethod         PaymentMethod
+  status                PaymentStatus @default(PENDING)
+  
+  // Gateway Information
+  gatewayName           String?       // Stripe, Razorpay, etc.
+  gatewayTransactionId  String?       @unique
+  gatewayResponse       Json?         // Full response from payment gateway
+  
+  // Refund Information
+  refundAmount          Decimal?      @db.Decimal(10, 2)
+  refundReason          String?
+  refundedAt            DateTime?
+  
+  // Invoice
+  invoiceUrl            String?
+  invoiceNumber         String?       @unique
+  
+  paidAt                DateTime?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  
+  @@index([patientId])
+  @@index([consultationId])
+  @@index([status])
+  @@index([gatewayTransactionId])
+  @@map("payments")
+}
+
+// ============================================
+// REVIEWS & RATINGS
+// ============================================
+
+model Review {
+  id              String       @id @default(uuid())
+  
+  consultationId  String       @unique
+  consultation    Consultation @relation(fields: [consultationId], references: [id])
+  
+  patientId       String
+  patient         User         @relation(fields: [patientId], references: [id])
+  
+  doctorId        String
+  doctor          Doctor       @relation(fields: [doctorId], references: [id])
+  
+  rating          Int          // 1-5
+  comment         String?      @db.Text
+  isAnonymous     Boolean      @default(false)
+  isVerified      Boolean      @default(true)  // Verified as real consultation
+  
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  
+  @@index([doctorId])
+  @@index([rating])
+  @@map("reviews")
+}
+
+// ============================================
+// NOTIFICATIONS
+// ============================================
+
+model Notification {
+  id              String              @id @default(uuid())
+  
+  userId          String
+  user            User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type            NotificationType
+  status          NotificationStatus  @default(PENDING)
+  
+  title           String
+  message         String              @db.Text
+  data            Json?               // Additional data (links, IDs, etc.)
+  
+  sentAt          DateTime?
+  readAt          DateTime?
+  
+  createdAt       DateTime            @default(now())
+  
+  @@index([userId])
+  @@index([status])
+  @@map("notifications")
+}
+
+// ============================================
+// AUDIT & COMPLIANCE
+// ============================================
+
+model AuditLog {
+  id              String      @id @default(uuid())
+  
+  userId          String?
+  user            User?       @relation(fields: [userId], references: [id])
+  
+  action          AuditAction
+  entityType      String      // "User", "Consultation", "Payment", etc.
+  entityId        String?
+  
+  ipAddress       String?
+  userAgent       String?
+  
+  changes         Json?       // Before/after values
+  metadata        Json?       // Additional context
+  
+  createdAt       DateTime    @default(now())
+  
+  @@index([userId])
+  @@index([action])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================
+// ANALYTICS & REPORTING (Optional)
+// ============================================
+
+model Analytics {
+  id              String   @id @default(uuid())
+  
+  metricName      String   // "daily_consultations", "revenue", etc.
+  metricValue     Decimal  @db.Decimal(15, 2)
+  dimensions      Json?    // Additional dimensions (specialty, location, etc.)
+  
+  date            DateTime @db.Date
+  createdAt       DateTime @default(now())
+  
+  @@unique([metricName, date])
+  @@index([metricName])
+  @@index([date])
+  @@map("analytics")
+}
