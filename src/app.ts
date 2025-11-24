@@ -21,7 +21,11 @@ import metricsRoute from './metrics/metrics.route';
 const app = express();
 
 // Middlewares
-app.use(cors());
+app.use(cors({
+  origin: "http://localhost:3000",  // your frontend URL
+  credentials: true
+}));
+
 app.use(helmet());
 app.use(compression());
 app.use(json());

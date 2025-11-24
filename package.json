@@ -6,7 +6,8 @@
     "prisma:migrate": "prisma migrate dev --schema=src/database/prisma/schema.prisma",
     "dev": "nodemon src/server.ts",
     "start": "node src/server.ts",
-    "test": "jest"
+    "test": "jest",
+    "worker:email": "ts-node src/common/workers/email.worker.ts"
   },
   "author": "",
   "license": "ISC",
@@ -14,6 +15,7 @@
   "dependencies": {
     "@prisma/client": "^6.19.0",
     "bcrypt": "^6.0.0",
+    "bullmq": "^5.63.2",
     "compression": "^1.8.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
