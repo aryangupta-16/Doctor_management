@@ -6,3 +6,5 @@ npx prisma migrate dev --name init
 npx prisma studio
 
 npm run dev
+
+npm run worker:email

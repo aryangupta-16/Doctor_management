@@ -4,7 +4,8 @@ import { hashPassword, comparePassword } from '../../utils/password';
 import { signAccessToken, signRefreshToken, signEmailToken, signResetToken, verifyToken } from '../../utils/jwt';
 import { config } from '../../config';
 import redis from '../../lib/redis';
-import { sendEmail } from '../../lib/mailer';
+// import { sendEmail } from '../../lib/mailer';
+import { emailProducer } from '../../common/queue/email.producer.service';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../../config/logger';
 
@@ -44,7 +45,7 @@ export class AuthService {
       <p>Please verify your email by clicking <a href="${verifyUrl}">here</a>.</p>
       <p>If you did not sign up, ignore this email.</p>`;
 
-    await sendEmail(user.email, 'Verify your email', html, `Verify: ${verifyUrl}`);
+    await emailProducer.queueVerificationEmail(user.email, emailToken, html, `Verify: ${verifyUrl}`);
 
     return { id: user.id, email: user.email };
   }
@@ -95,7 +96,7 @@ export class AuthService {
       <p>Please verify your email by clicking <a href="${verifyUrl}">here</a>.</p>
       <p>If you did not sign up, ignore this email.</p>`;
 
-    await sendEmail(user.email, 'Verify your email', html, `Verify: ${verifyUrl}`);
+    await emailProducer.queueVerificationEmail(user.email, emailToken, html, `Verify: ${verifyUrl}`);
 
     return { id: user.id, email: user.email };
   }
@@ -205,7 +206,12 @@ export class AuthService {
       <p>To reset your password click <a href="${resetUrl}">here</a>. This link expires in ${config.jwtResetPwdExpiry || '1 hour'}.</p>
       <p>If you did not request this, ignore this email.</p>`;
 
-    await sendEmail(user.email, 'Reset your password', html, `Reset: ${resetUrl}`);
+    await emailProducer.queueResetPasswordEmail(
+  user.email,
+  resetToken,
+  html,
+  `Reset Password: ${resetUrl}`
+);
     await prisma.auditLog.create({ data: { userId: user.id, action: 'ACCESS', entityType: 'User', entityId: user.id, metadata: { forgotPassword: true } } });
 
     return { ok: true };
@@ -254,7 +260,7 @@ export class AuthService {
     const token = signEmailToken({ sub: user.id, type: 'email_verification' });
     const verifyUrl = `${config.appBaseUrl}/api/auth/verify-email?token=${token}`;
     const html = `<p>Please verify your email by clicking <a href="${verifyUrl}">here</a>.</p>`;
-    await sendEmail(user.email, 'Verify your email', html, `Verify: ${verifyUrl}`);
+    await emailProducer.queueVerificationEmail(user.email, token, html, `Verify: ${verifyUrl}`);
     return { ok: true };
   }
 
