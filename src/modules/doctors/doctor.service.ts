@@ -20,17 +20,15 @@ export class DoctorService {
         reviews: true,
       },
     });
-    console.log("doc", doc);
     return doc;
   }
 
   static async getOwnDoctorProfile(userId: string) {
-    console.log("starting api")
+    
     const doc = await prisma.doctor.findUnique({
       where: { userId },
       include: { user: true, availability: true },
     });
-    console.log("own doctor", doc);
     return doc;
   }
 
@@ -40,7 +38,7 @@ export class DoctorService {
       data,
       include: { user: true },
     });
-    console.log("updated doctor", updatedDoc);
+    
     return updatedDoc;
   }
 }

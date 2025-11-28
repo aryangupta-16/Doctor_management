@@ -17,7 +17,7 @@ export class AuthService {
     if (existing) throw new Error('EMAIL_EXISTS');
 
     const passwordHash = await hashPassword(password);
-    console.log("Password hash:", passwordHash);
+
     const user = await prisma.user.create({
       data: {
         email,
@@ -106,7 +106,6 @@ export class AuthService {
     const user = await prisma.user.findUnique({ where: { email }, include: {
         doctor : true
     }});
-    console.log("user found:",user);
     if (!user) throw new Error('INVALID_CREDENTIALS');
 
     if(user.role === RoleType.DOCTOR && user.doctor){
@@ -117,7 +116,6 @@ export class AuthService {
 
     const ok = await comparePassword(password, user.passwordHash);
 
-    console.log("Password match:", ok);
     if (!ok) {
       // log failed login attempt
       await prisma.auditLog.create({ data: { userId: user.id, action: 'ACCESS', entityType: 'User', entityId: user.id, metadata: { failedLogin: true } } });

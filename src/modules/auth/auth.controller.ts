@@ -26,9 +26,7 @@ export async function registerDoctor(req: Request, res: Response){
 export async function login(req: Request, res: Response) {
   try {
     const { email, password, deviceInfo } = req.body;
-    console.log("email:", email);
-    console.log("password:", password);
-    console.log("deviceInfo:", deviceInfo);
+
     const result = await AuthService.login({ email, password, deviceInfo });
     return res.json({ success: true, data: result });
   } catch (err: any) {
