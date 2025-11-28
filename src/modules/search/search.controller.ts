@@ -42,8 +42,7 @@ export const searchController = {
                 sortBy: sortBy as string | undefined,
                 sortOrder: sortOrder as "asc" | "desc" | undefined,
             };
-            const result = searchService.searchDoctors(filters);
-
+            const result = await searchService.searchDoctors(filters);
             return res.status(201).json({ success: true, result });
     } catch (err: any) {
       return res.status(400).json({ success: false, message: err.message });
@@ -52,7 +51,7 @@ export const searchController = {
 
     getSpecialities : async(req:Request, res:Response) => {
         try{
-            const result = searchService.getSpecialities();
+            const result = await searchService.getSpecialities();
 
             return res.status(201).json({ success: true, result });
     } catch (err: any) {
@@ -62,7 +61,7 @@ export const searchController = {
 
     getLocations : async(req:Request, res:Response) => {
         try{
-            const result = searchService.getLocations();
+            const result = await searchService.getLocations();
 
             return res.status(201).json({ success: true, result });
     } catch (err: any) {
@@ -73,7 +72,7 @@ export const searchController = {
     getFeaturedDoctor : async(req:Request, res:Response) => {
         try{
             const {limit} = req.query;
-            const result = searchService.getFeaturedDoctors(limit ? parseInt(limit as string):undefined);
+            const result = await searchService.getFeaturedDoctors(limit ? parseInt(limit as string):undefined);
             return res.status(201).json({ success: true, result });
     } catch (err: any) {
             return res.status(400).json({ success: false, message: err.message });

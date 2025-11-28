@@ -54,6 +54,7 @@ export default class ConsultationService {
   static async bookConsultation(patientUserId: string, data: BookConsultationInput) {
     const { slotId, consultationType, chiefComplaint, symptoms } = data;
 
+    console.log(slotId);
     const slot = await prisma.availabilitySlot.findUnique({
       where: { id: slotId },
       include: { doctor: true },

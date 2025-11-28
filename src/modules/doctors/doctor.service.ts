@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 export class DoctorService {
   // Get doctor by ID (public)
   static async getDoctorById(id: string) {
-    return prisma.doctor.findUnique({
+    const doc = await prisma.doctor.findUnique({
       where: { id },
       include: {
         user: {
@@ -20,20 +20,27 @@ export class DoctorService {
         reviews: true,
       },
     });
+    console.log("doc", doc);
+    return doc;
   }
 
   static async getOwnDoctorProfile(userId: string) {
-    return prisma.doctor.findUnique({
+    console.log("starting api")
+    const doc = await prisma.doctor.findUnique({
       where: { userId },
       include: { user: true, availability: true },
     });
+    console.log("own doctor", doc);
+    return doc;
   }
 
   static async updateDoctorProfile(doctorId: string, data: any) {
-    return prisma.doctor.update({
+    const updatedDoc = await prisma.doctor.update({
       where: { id: doctorId },
       data,
       include: { user: true },
     });
+    console.log("updated doctor", updatedDoc);
+    return updatedDoc;
   }
 }

@@ -7,7 +7,8 @@
     "dev": "nodemon src/server.ts",
     "start": "node src/server.ts",
     "test": "jest",
-    "worker:email": "ts-node src/common/workers/email.worker.ts"
+    "worker:email": "ts-node src/common/workers/email.worker.ts",
+    "seed": "ts-node scripts/seedDatabase.ts"
   },
   "author": "",
   "license": "ISC",
@@ -40,6 +41,7 @@
     "winston": "^3.18.3"
   },
   "devDependencies": {
+    "@faker-js/faker": "^10.1.0",
     "@types/bcrypt": "^6.0.0",
     "@types/compression": "^1.8.1",
     "@types/cookie-parser": "^1.4.10",

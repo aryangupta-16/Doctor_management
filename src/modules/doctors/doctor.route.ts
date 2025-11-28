@@ -6,12 +6,13 @@ import { authorizeRoles } from '../../common/middlewares/roleGuard';
 
 const router = Router();
 
+router.put('/me', authenticateJWT, authorizeRoles('DOCTOR'), DoctorController.updateDoctorProfile);
+
+router.get('/me', authenticateJWT, authorizeRoles('DOCTOR'), DoctorController.getOwnDoctorProfile);
+
 router.get('/:doctorId', DoctorController.getDoctorById);
 
 router.put('/:doctorId', authenticateJWT, authorizeRoles('ADMIN', 'DOCTOR'), DoctorController.updateDoctorProfile);
 
-router.put('/me', authenticateJWT, authorizeRoles('DOCTOR'), DoctorController.updateDoctorProfile);
-
-router.get('/me', authenticateJWT, authorizeRoles('DOCTOR'), DoctorController.getOwnDoctorProfile);
 
 export default router;
