@@ -1,5 +1,6 @@
 import prisma from "../../prisma/client";
 import { PaymentMethod, PaymentStatus } from "@prisma/client";
+import { AppError } from "../../utils/AppError";
 
 type InitiateInput = {
   consultationId?: string;
@@ -60,176 +61,214 @@ function mockGatewayRefund(gatewayTransactionId: string, amount: number) {
 
 export default class PaymentService {
   static async initiate(userId: string, input: InitiateInput) {
-    const { consultationId, amount, currency = "INR", paymentMethod, metadata } = input;
-    if (!amount || amount <= 0) throw new Error("Invalid amount");
+    try {
+      const { consultationId, amount, currency = "INR", paymentMethod, metadata } = input;
+      if (!amount || amount <= 0) throw new AppError("Invalid amount", 400);
 
-    // If linked to a consultation, validate access
-    if (consultationId) {
-      const c = await prisma.consultation.findUnique({ where: { id: consultationId } });
-      if (!c) throw new Error("Consultation not found");
-      if (c.patientId !== userId) throw new Error("Forbidden");
+      if (consultationId) {
+        const c = await prisma.consultation.findUnique({ where: { id: consultationId } });
+        if (!c) throw new AppError("Consultation not found", 404);
+        if (c.patientId !== userId) throw new AppError("Forbidden", 403);
+      }
+
+      const transactionNumber = await generatePaymentNumber();
+      const gatewayInit = mockGatewayCreate(amount, currency);
+      const combinedGatewayResponse = metadata
+        ? { ...(gatewayInit.gatewayResponse as any), metadata }
+        : gatewayInit.gatewayResponse;
+
+      const payment = await prisma.payment.create({
+        data: {
+          transactionNumber,
+          patientId: userId,
+          consultationId: consultationId ?? null,
+          amount,
+          currency,
+          paymentMethod,
+          status: gatewayInit.status,
+          gatewayName: gatewayInit.gatewayName,
+          gatewayTransactionId: gatewayInit.gatewayTransactionId,
+          gatewayResponse: combinedGatewayResponse,
+          invoiceUrl: null,
+        },
+      });
+
+      return payment;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to initiate payment", 500);
     }
-
-    const transactionNumber = await generatePaymentNumber();
-    const gatewayInit = mockGatewayCreate(amount, currency);
-    const combinedGatewayResponse = metadata
-      ? { ...(gatewayInit.gatewayResponse as any), metadata }
-      : gatewayInit.gatewayResponse;
-
-    const payment = await prisma.payment.create({
-      data: {
-        transactionNumber,
-        patientId: userId,
-        consultationId: consultationId ?? null,
-        amount,
-        currency,
-        paymentMethod,
-        status: gatewayInit.status,
-        gatewayName: gatewayInit.gatewayName,
-        gatewayTransactionId: gatewayInit.gatewayTransactionId,
-        gatewayResponse: combinedGatewayResponse,
-        invoiceUrl: null,
-      },
-    });
-
-    return payment;
   }
 
   static async getMyPayments(userId: string, opts: ListOptions) {
-    const page = Math.max(1, opts.page ?? 1);
-    const take = Math.max(1, Math.min(50, opts.limit ?? 10));
-    const skip = (page - 1) * take;
+    try {
+      const page = Math.max(1, opts.page ?? 1);
+      const take = Math.max(1, Math.min(50, opts.limit ?? 10));
+      const skip = (page - 1) * take;
 
-    const where: any = { patientId: userId };
-    if (opts.status) where.status = opts.status;
+      const where: any = { patientId: userId };
+      if (opts.status) where.status = opts.status;
 
-    const [total, items] = await Promise.all([
-      prisma.payment.count({ where }),
-      prisma.payment.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip,
-        take,
-        include: {
-          consultation: {
-            select: {
-              id: true,
-              consultationNumber: true,
-              doctorId: true,
-              scheduledStartTime: true,
+      const [total, items] = await Promise.all([
+        prisma.payment.count({ where }),
+        prisma.payment.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          skip,
+          take,
+          include: {
+            consultation: {
+              select: {
+                id: true,
+                consultationNumber: true,
+                doctorId: true,
+                scheduledStartTime: true,
+              },
             },
           },
-        },
-      }),
-    ]);
+        }),
+      ]);
 
-    return { page, limit: take, total, items };
+      return { page, limit: take, total, items };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to get payments", 500);
+    }
   }
 
   static async getById(id: string, userId: string) {
-    const p = await prisma.payment.findUnique({
-      where: { id },
-      include: { consultation: true },
-    });
-    if (!p) throw new Error("Payment not found");
-    if (p.patientId !== userId) throw new Error("Forbidden");
-    return p;
+    try {
+      const p = await prisma.payment.findUnique({
+        where: { id },
+        include: { consultation: true },
+      });
+      if (!p) throw new AppError("Payment not found", 404);
+      if (p.patientId !== userId) throw new AppError("Forbidden", 403);
+      return p;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to get payment", 500);
+    }
   }
 
   static async getByConsultation(consultationId: string, userId: string) {
-    const c = await prisma.consultation.findUnique({ where: { id: consultationId } });
-    if (!c) throw new Error("Consultation not found");
-    if (c.patientId !== userId) throw new Error("Forbidden");
+    try {
+      const c = await prisma.consultation.findUnique({ where: { id: consultationId } });
+      if (!c) throw new AppError("Consultation not found", 404);
+      if (c.patientId !== userId) throw new AppError("Forbidden", 403);
 
-    const payments = await prisma.payment.findMany({
-      where: { consultationId },
-      orderBy: { createdAt: "desc" },
-    });
-    return payments;
+      const payments = await prisma.payment.findMany({
+        where: { consultationId },
+        orderBy: { createdAt: "desc" },
+      });
+      return payments;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to get payments for consultation", 500);
+    }
   }
 
   static async process(id: string, userId: string) {
-    const p = await prisma.payment.findUnique({ where: { id } });
-    if (!p) throw new Error("Payment not found");
-    if (p.patientId !== userId) throw new Error("Forbidden");
+    try {
+      const p = await prisma.payment.findUnique({ where: { id } });
+      if (!p) throw new AppError("Payment not found", 404);
+      if (p.patientId !== userId) throw new AppError("Forbidden", 403);
 
-    // Mock processing: keep as PENDING with gateway response update
-    const updated = await prisma.payment.update({
-      where: { id },
-      data: {
-        gatewayResponse: { ...(p.gatewayResponse as any), processedAt: new Date().toISOString() },
-      },
-    });
-    return updated;
+      const updated = await prisma.payment.update({
+        where: { id },
+        data: {
+          gatewayResponse: { ...(p.gatewayResponse as any), processedAt: new Date().toISOString() },
+        },
+      });
+      return updated;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to process payment", 500);
+    }
   }
 
   static async verify(id: string, userId: string) {
-    const p = await prisma.payment.findUnique({ where: { id } });
-    if (!p) throw new Error("Payment not found");
-    if (p.patientId !== userId) throw new Error("Forbidden");
+    try {
+      const p = await prisma.payment.findUnique({ where: { id } });
+      if (!p) throw new AppError("Payment not found", 404);
+      if (p.patientId !== userId) throw new AppError("Forbidden", 403);
 
-    const verifyRes = mockGatewayVerify(p.gatewayTransactionId || "");
-    const updated = await prisma.payment.update({
-      where: { id },
-      data: {
-        status: verifyRes.status,
-        gatewayResponse: { ...(p.gatewayResponse as any), ...verifyRes.gatewayResponse },
-        paidAt: verifyRes.status === PaymentStatus.COMPLETED ? new Date() : null,
-      },
-    });
-    return updated;
+      const verifyRes = mockGatewayVerify(p.gatewayTransactionId || "");
+      const updated = await prisma.payment.update({
+        where: { id },
+        data: {
+          status: verifyRes.status,
+          gatewayResponse: { ...(p.gatewayResponse as any), ...verifyRes.gatewayResponse },
+          paidAt: verifyRes.status === PaymentStatus.COMPLETED ? new Date() : null,
+        },
+      });
+      return updated;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to verify payment", 500);
+    }
   }
 
   static async refund(id: string, userId: string, amount?: number) {
-    const p = await prisma.payment.findUnique({ where: { id } });
-    if (!p) throw new Error("Payment not found");
-    if (p.patientId !== userId) throw new Error("Forbidden");
+    try {
+      const p = await prisma.payment.findUnique({ where: { id } });
+      if (!p) throw new AppError("Payment not found", 404);
+      if (p.patientId !== userId) throw new AppError("Forbidden", 403);
 
-    const refundAmount = amount ?? Number(p.amount);
-    const refundRes = mockGatewayRefund(p.gatewayTransactionId || "", refundAmount);
+      const refundAmount = amount ?? Number(p.amount);
+      const refundRes = mockGatewayRefund(p.gatewayTransactionId || "", refundAmount);
 
-    const updated = await prisma.payment.update({
-      where: { id },
-      data: {
-        status: refundRes.status,
-        refundAmount,
-        refundReason: "Mock refund",
-        refundedAt: new Date(),
-        gatewayResponse: { ...(p.gatewayResponse as any), ...refundRes.gatewayResponse },
-      },
-    });
-    return updated;
+      const updated = await prisma.payment.update({
+        where: { id },
+        data: {
+          status: refundRes.status,
+          refundAmount,
+          refundReason: "Mock refund",
+          refundedAt: new Date(),
+          gatewayResponse: { ...(p.gatewayResponse as any), ...refundRes.gatewayResponse },
+        },
+      });
+      return updated;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to refund payment", 500);
+    }
   }
 
   static async invoice(id: string, userId: string) {
-    const p = await prisma.payment.findUnique({
-      where: { id },
-      include: {
-        consultation: {
-          include: {
-            doctor: { include: { user: true } },
-            patient: true,
+    try {
+      const p = await prisma.payment.findUnique({
+        where: { id },
+        include: {
+          consultation: {
+            include: {
+              doctor: { include: { user: true } },
+              patient: true,
+            },
           },
         },
-      },
-    });
-    if (!p) throw new Error("Payment not found");
-    if (p.patientId !== userId) throw new Error("Forbidden");
+      });
+      if (!p) throw new AppError("Payment not found", 404);
+      if (p.patientId !== userId) throw new AppError("Forbidden", 403);
 
-    const lines: string[] = [];
-    lines.push("Invoice");
-    lines.push(`Transaction: ${p.transactionNumber}`);
-    lines.push(`Status: ${p.status}`);
-    lines.push(`Amount: ${p.amount} ${p.currency}`);
-    if (p.consultation) {
-      const docUser = (p.consultation.doctor as any)?.user;
-      lines.push(`Consultation: ${p.consultation.consultationNumber}`);
-      if (docUser) lines.push(`Doctor: ${docUser.firstName} ${docUser.lastName}`);
-      lines.push(`Patient: ${p.consultation.patient.firstName} ${p.consultation.patient.lastName}`);
+      const lines: string[] = [];
+      lines.push("Invoice");
+      lines.push(`Transaction: ${p.transactionNumber}`);
+      lines.push(`Status: ${p.status}`);
+      lines.push(`Amount: ${p.amount} ${p.currency}`);
+      if (p.consultation) {
+        const docUser = (p.consultation.doctor as any)?.user;
+        lines.push(`Consultation: ${p.consultation.consultationNumber}`);
+        if (docUser) lines.push(`Doctor: ${docUser.firstName} ${docUser.lastName}`);
+        lines.push(`Patient: ${p.consultation.patient.firstName} ${p.consultation.patient.lastName}`);
+      }
+      const content = lines.join("\n");
+      const base64 = Buffer.from(content, "utf-8").toString("base64");
+      return { fileName: `${p.transactionNumber}.txt`, contentType: "text/plain", base64 };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to generate invoice", 500);
     }
-    const content = lines.join("\n");
-    const base64 = Buffer.from(content, "utf-8").toString("base64");
-    return { fileName: `${p.transactionNumber}.txt`, contentType: "text/plain", base64 };
   }
 }
 

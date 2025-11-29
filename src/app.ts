@@ -4,7 +4,7 @@ import helmet from "helmet";
 import compression from "compression";
 import { json } from "body-parser";
 import { logger } from "./config/logger";
-// import { errorHandler } from "./common/middlewares/errorHandler";
+import { errorMiddleware } from "./middleware/errorMiddleware";
 import authRoutes from "./modules/auth/auth.routes";
 import userRoutes from "./modules/users/user.route"
 import doctorRoutes from './modules/doctors/doctor.route';
@@ -48,7 +48,7 @@ app.use("/api/admin", AdminRoutes)
 // Health Check
 app.get("/health", (req, res) => res.status(200).json({ status: "ok" }));
 
-// Error handler
-// app.use(errorHandler);
+// Error handler (must be after all routes)
+app.use(errorMiddleware);
 
 export { app };

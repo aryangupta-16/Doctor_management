@@ -1,5 +1,6 @@
 import prisma from "../../prisma/client";
 import { SlotStatus } from "@prisma/client";
+import { AppError } from "../../utils/AppError";
 
 type CreateWeeklyScheduleInput = {
   dayOfWeek: number; // 0-6
@@ -78,48 +79,56 @@ export default class AvailabilityService {
     doctorId: string,
     input: CreateWeeklyScheduleInput
   ) {
-    const { dayOfWeek, startTime, endTime } = input;
+    try {
+      const { dayOfWeek, startTime, endTime } = input;
 
-    if (dayOfWeek < 0 || dayOfWeek > 6)
-      throw new Error("dayOfWeek must be between 0 (Sun) and 6 (Sat)");
+      if (dayOfWeek < 0 || dayOfWeek > 6)
+        throw new AppError("dayOfWeek must be between 0 (Sun) and 6 (Sat)", 400);
 
-    const startMins = parseTimeToMinutes(startTime);
-    const endMins = parseTimeToMinutes(endTime);
-    if (endMins <= startMins)
-      throw new Error("endTime must be greater than startTime");
+      const startMins = parseTimeToMinutes(startTime);
+      const endMins = parseTimeToMinutes(endTime);
+      if (endMins <= startMins)
+        throw new AppError("endTime must be greater than startTime", 400);
 
-    // Optional: Prevent overlapping schedules for same day
-    const overlaps = await prisma.doctorAvailability.findFirst({
-      where: {
-        doctorId,
-        dayOfWeek,
-        // Overlap condition: new.start < existing.end && new.end > existing.start
-        AND: [
-          { startTime: { lt: endTime } },
-          { endTime: { gt: startTime } },
-        ],
-        isActive: true,
-      },
-    });
-    if (overlaps) {
-      throw new Error("Overlapping schedule exists for the given day");
+      const overlaps = await prisma.doctorAvailability.findFirst({
+        where: {
+          doctorId,
+          dayOfWeek,
+          AND: [
+            { startTime: { lt: endTime } },
+            { endTime: { gt: startTime } },
+          ],
+          isActive: true,
+        },
+      });
+      if (overlaps) {
+        throw new AppError("Overlapping schedule exists for the given day", 409);
+      }
+
+      return await prisma.doctorAvailability.create({
+        data: {
+          doctorId,
+          dayOfWeek,
+          startTime,
+          endTime,
+        },
+      });
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to create weekly schedule", 500);
     }
-
-    return prisma.doctorAvailability.create({
-      data: {
-        doctorId,
-        dayOfWeek,
-        startTime,
-        endTime,
-      },
-    });
   }
 
   static async getWeeklySchedule(doctorId: string) {
-    return prisma.doctorAvailability.findMany({
-      where: { doctorId },
-      orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
-    });
+    try {
+      return await prisma.doctorAvailability.findMany({
+        where: { doctorId },
+        orderBy: [{ dayOfWeek: "asc" }, { startTime: "asc" }],
+      });
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to fetch weekly schedule", 500);
+    }
   }
 
   static async updateWeeklySchedule(
@@ -127,96 +136,105 @@ export default class AvailabilityService {
     scheduleId: string,
     input: UpdateWeeklyScheduleInput
   ) {
-    // Ensure schedule belongs to doctor
-    const existing = await prisma.doctorAvailability.findUnique({
-      where: { id: scheduleId },
-    });
-    if (!existing || existing.doctorId !== doctorId) {
-      throw new Error("Schedule not found for this doctor");
-    }
+    try {
+      const existing = await prisma.doctorAvailability.findUnique({
+        where: { id: scheduleId },
+      });
+      if (!existing || existing.doctorId !== doctorId) {
+        throw new AppError("Schedule not found for this doctor", 404);
+      }
 
-    if (input.dayOfWeek !== undefined) {
-      if (input.dayOfWeek < 0 || input.dayOfWeek > 6)
-        throw new Error("dayOfWeek must be between 0 and 6");
-    }
-    if (input.startTime) parseTimeToMinutes(input.startTime);
-    if (input.endTime) parseTimeToMinutes(input.endTime);
-    if (input.startTime && input.endTime) {
-      if (
-        parseTimeToMinutes(input.endTime) <= parseTimeToMinutes(input.startTime)
-      )
-        throw new Error("endTime must be greater than startTime");
-    }
+      if (input.dayOfWeek !== undefined) {
+        if (input.dayOfWeek < 0 || input.dayOfWeek > 6)
+          throw new AppError("dayOfWeek must be between 0 and 6", 400);
+      }
+      if (input.startTime) parseTimeToMinutes(input.startTime);
+      if (input.endTime) parseTimeToMinutes(input.endTime);
+      if (input.startTime && input.endTime) {
+        if (
+          parseTimeToMinutes(input.endTime) <= parseTimeToMinutes(input.startTime)
+        )
+          throw new AppError("endTime must be greater than startTime", 400);
+      }
 
-    return prisma.doctorAvailability.update({
-      where: { id: scheduleId },
-      data: {
-        dayOfWeek: input.dayOfWeek ?? undefined,
-        startTime: input.startTime ?? undefined,
-        endTime: input.endTime ?? undefined,
-        isActive: input.isActive ?? undefined,
-      },
-    });
+      return await prisma.doctorAvailability.update({
+        where: { id: scheduleId },
+        data: {
+          dayOfWeek: input.dayOfWeek ?? undefined,
+          startTime: input.startTime ?? undefined,
+          endTime: input.endTime ?? undefined,
+          isActive: input.isActive ?? undefined,
+        },
+      });
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to update weekly schedule", 500);
+    }
   }
 
   static async deleteWeeklySchedule(doctorId: string, scheduleId: string) {
-    // Ensure schedule belongs to doctor
-    const existing = await prisma.doctorAvailability.findUnique({
-      where: { id: scheduleId },
-    });
-    if (!existing || existing.doctorId !== doctorId) {
-      throw new Error("Schedule not found for this doctor");
-    }
+    try {
+      const existing = await prisma.doctorAvailability.findUnique({
+        where: { id: scheduleId },
+      });
+      if (!existing || existing.doctorId !== doctorId) {
+        throw new AppError("Schedule not found for this doctor", 404);
+      }
 
-    await prisma.doctorAvailability.delete({ where: { id: scheduleId } });
-    return { id: scheduleId, deleted: true };
+      await prisma.doctorAvailability.delete({ where: { id: scheduleId } });
+      return { id: scheduleId, deleted: true };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to delete weekly schedule", 500);
+    }
   }
 
   // Slots ============================================================
   static async generateSlots(doctorId: string, input: GenerateSlotsInput) {
-    const { startDate, endDate, slotDuration } = input;
-    if (!startDate || !endDate) throw new Error("startDate and endDate required");
-    if (!slotDuration || slotDuration <= 0)
-      throw new Error("slotDuration must be a positive number of minutes");
+    try {
+      const { startDate, endDate, slotDuration } = input;
+      if (!startDate || !endDate) throw new AppError("startDate and endDate required", 400);
+      if (!slotDuration || slotDuration <= 0)
+        throw new AppError("slotDuration must be a positive number of minutes", 400);
 
-    const start = startOfDay(toDateOnly(startDate));
-    const end = endOfDay(toDateOnly(endDate));
-    if (end < start) throw new Error("endDate must be on/after startDate");
+      const start = startOfDay(toDateOnly(startDate));
+      const end = endOfDay(toDateOnly(endDate));
+      if (end < start) throw new AppError("endDate must be on/after startDate", 400);
 
     // Fetch weekly schedules once
-    const schedules = await prisma.doctorAvailability.findMany({
-      where: { doctorId, isActive: true },
-    });
+      const schedules = await prisma.doctorAvailability.findMany({
+        where: { doctorId, isActive: true },
+      });
 
-    if (schedules.length === 0) {
-      return { created: 0, skipped: 0, slots: [] };
-    }
+      if (schedules.length === 0) {
+        return { created: 0, skipped: 0, slots: [] };
+      }
 
     // Fetch existing slots in range to avoid duplicates
-    const existingSlots = await prisma.availabilitySlot.findMany({
-      where: {
-        doctorId,
-        slotStartTime: { gte: start },
-        slotEndTime: { lte: end },
-      },
-      select: { slotStartTime: true },
-    });
+      const existingSlots = await prisma.availabilitySlot.findMany({
+        where: {
+          doctorId,
+          slotStartTime: { gte: start },
+          slotEndTime: { lte: end },
+        },
+        select: { slotStartTime: true },
+      });
     const existingStartSet = new Set(
       existingSlots.map((s) => s.slotStartTime.toISOString())
     );
 
     const toCreate: { slotStartTime: Date; slotEndTime: Date }[] = [];
 
-    for (
-      let day = new Date(start.getTime());
-      day.getTime() <= end.getTime();
-      day = addMinutes(day, 24 * 60)
-    ) {
+      for (
+        let day = new Date(start.getTime());
+        day.getTime() <= end.getTime();
+        day = addMinutes(day, 24 * 60)
+      ) {
       const dow = day.getDay();
       const daySchedules = schedules.filter((s) => s.dayOfWeek === dow);
       if (daySchedules.length === 0) continue;
 
-      for (const sch of daySchedules) {
+        for (const sch of daySchedules) {
         const startMins = parseTimeToMinutes(sch.startTime);
         const endMins = parseTimeToMinutes(sch.endTime);
 
@@ -227,129 +245,146 @@ export default class AvailabilityService {
         const slotWindowEnd = addMinutes(windowStart, endMins);
 
         // Generate slots
-        for (
-          let slotStart = new Date(slotWindowStart);
-          addMinutes(slotStart, slotDuration) <= slotWindowEnd;
-          slotStart = addMinutes(slotStart, slotDuration)
-        ) {
+          for (
+            let slotStart = new Date(slotWindowStart);
+            addMinutes(slotStart, slotDuration) <= slotWindowEnd;
+            slotStart = addMinutes(slotStart, slotDuration)
+          ) {
           const slotEnd = addMinutes(slotStart, slotDuration);
           const key = slotStart.toISOString();
           if (!existingStartSet.has(key)) {
             toCreate.push({ slotStartTime: slotStart, slotEndTime: slotEnd });
           }
         }
+        }
       }
-    }
 
-    if (toCreate.length === 0) {
-      return { created: 0, skipped: 0, slots: [] };
-    }
+      if (toCreate.length === 0) {
+        return { created: 0, skipped: 0, slots: [] };
+      }
 
-    // Create in batches to avoid payload limits
-    const BATCH = 200;
-    const createdSlots: any[] = [];
-    for (let i = 0; i < toCreate.length; i += BATCH) {
-      const batch = toCreate.slice(i, i + BATCH);
-      const created = await prisma.$transaction(
-        batch.map((b) =>
-          prisma.availabilitySlot.create({
-            data: {
-              doctorId,
-              slotStartTime: b.slotStartTime,
-              slotEndTime: b.slotEndTime,
-              status: SlotStatus.AVAILABLE,
-            },
-          })
-        )
-      );
-      createdSlots.push(...created);
-    }
+      const BATCH = 200;
+      const createdSlots: any[] = [];
+      for (let i = 0; i < toCreate.length; i += BATCH) {
+        const batch = toCreate.slice(i, i + BATCH);
+        const created = await prisma.$transaction(
+          batch.map((b) =>
+            prisma.availabilitySlot.create({
+              data: {
+                doctorId,
+                slotStartTime: b.slotStartTime,
+                slotEndTime: b.slotEndTime,
+                status: SlotStatus.AVAILABLE,
+              },
+            })
+          )
+        );
+        createdSlots.push(...created);
+      }
 
-    return { created: createdSlots.length, skipped: 0, slots: createdSlots };
+      return { created: createdSlots.length, skipped: 0, slots: createdSlots };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to generate slots", 500);
+    }
   }
 
   static async getSlots(doctorId: string, query: GetSlotsQuery) {
-    const { date, status, startDate, endDate } = query;
+    try {
+      const { date, status, startDate, endDate } = query;
 
-    let timeFilter: { gte?: Date; lte?: Date } = {};
-    if (date) {
-      const theDay = toDateOnly(String(date));
-      timeFilter = { gte: startOfDay(theDay), lte: endOfDay(theDay) };
-    } else if (startDate || endDate) {
-      const g = startDate ? startOfDay(toDateOnly(String(startDate))) : undefined;
-      const l = endDate ? endOfDay(toDateOnly(String(endDate))) : undefined;
-      timeFilter = { ...(g ? { gte: g } : {}), ...(l ? { lte: l } : {}) };
+      let timeFilter: { gte?: Date; lte?: Date } = {};
+      if (date) {
+        const theDay = toDateOnly(String(date));
+        timeFilter = { gte: startOfDay(theDay), lte: endOfDay(theDay) };
+      } else if (startDate || endDate) {
+        const g = startDate ? startOfDay(toDateOnly(String(startDate))) : undefined;
+        const l = endDate ? endOfDay(toDateOnly(String(endDate))) : undefined;
+        timeFilter = { ...(g ? { gte: g } : {}), ...(l ? { lte: l } : {}) };
+      }
+
+      let statusFilter: any = undefined;
+      if (status !== undefined) {
+        const asArray = Array.isArray(status)
+          ? status
+          : String(status).split(",").map((s) => s.trim()).filter(Boolean);
+        statusFilter = { in: asArray as SlotStatus[] };
+      }
+
+      const slots = await prisma.availabilitySlot.findMany({
+        where: {
+          doctorId,
+          ...(Object.keys(timeFilter).length ? { slotStartTime: timeFilter } : {}),
+          ...(statusFilter ? { status: statusFilter } : {}),
+        },
+        orderBy: [{ slotStartTime: "asc" }],
+      });
+
+      return { count: slots.length, slots };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to get slots", 500);
     }
-
-    let statusFilter: any = undefined;
-    if (status !== undefined) {
-      const asArray = Array.isArray(status)
-        ? status
-        : String(status).split(",").map((s) => s.trim()).filter(Boolean);
-      statusFilter = { in: asArray as SlotStatus[] };
-    }
-
-    const slots = await prisma.availabilitySlot.findMany({
-      where: {
-        doctorId,
-        ...(Object.keys(timeFilter).length ? { slotStartTime: timeFilter } : {}),
-        ...(statusFilter ? { status: statusFilter } : {}),
-      },
-      orderBy: [{ slotStartTime: "asc" }],
-    });
-
-    return { count: slots.length, slots };
   }
 
   static async blockSlots(doctorId: string, input: BlockSlotsInput) {
-    const { slotIds } = input;
-    if (!slotIds || slotIds.length === 0)
-      throw new Error("slotIds are required");
+    try {
+      const { slotIds } = input;
+      if (!slotIds || slotIds.length === 0)
+        throw new AppError("slotIds are required", 400);
 
-    // Update individually to return updated records
-    const updated: any[] = [];
-    for (const id of slotIds) {
-      const slot = await prisma.availabilitySlot.findUnique({ where: { id } });
-      if (!slot || slot.doctorId !== doctorId) continue;
-      const upd = await prisma.availabilitySlot.update({
-        where: { id },
-        data: { status: SlotStatus.CANCELLED },
-      });
-      updated.push(upd);
+      const updated: any[] = [];
+      for (const id of slotIds) {
+        const slot = await prisma.availabilitySlot.findUnique({ where: { id } });
+        if (!slot || slot.doctorId !== doctorId) continue;
+        const upd = await prisma.availabilitySlot.update({
+          where: { id },
+          data: { status: SlotStatus.CANCELLED },
+        });
+        updated.push(upd);
+      }
+
+      return { updatedCount: updated.length, slots: updated };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to block slots", 500);
     }
-
-    return { updatedCount: updated.length, slots: updated };
   }
 
   static async getDoctorAvailableSlots(
     doctorId: string,
     query: GetDoctorAvailableSlotsQuery
   ) {
-    const { date, startDate, endDate, limit } = query;
+    try {
+      const { date, startDate, endDate, limit } = query;
 
-    let timeFilter: { gte?: Date; lte?: Date } = {};
-    if (date) {
-      const theDay = toDateOnly(String(date));
-      timeFilter = { gte: startOfDay(theDay), lte: endOfDay(theDay) };
-    } else if (startDate || endDate) {
-      const g = startDate ? startOfDay(toDateOnly(String(startDate))) : undefined;
-      const l = endDate ? endOfDay(toDateOnly(String(endDate))) : undefined;
-      timeFilter = { ...(g ? { gte: g } : {}), ...(l ? { lte: l } : {}) };
+      let timeFilter: { gte?: Date; lte?: Date } = {};
+      if (date) {
+        const theDay = toDateOnly(String(date));
+        timeFilter = { gte: startOfDay(theDay), lte: endOfDay(theDay) };
+      } else if (startDate || endDate) {
+        const g = startDate ? startOfDay(toDateOnly(String(startDate))) : undefined;
+        const l = endDate ? endOfDay(toDateOnly(String(endDate))) : undefined;
+        timeFilter = { ...(g ? { gte: g } : {}), ...(l ? { lte: l } : {}) };
+      }
+
+      const take = limit ? Math.max(1, parseInt(String(limit), 10)) : undefined;
+
+      const slots = await prisma.availabilitySlot.findMany({
+        where: {
+          doctorId,
+          status: SlotStatus.AVAILABLE,
+          ...(Object.keys(timeFilter).length ? { slotStartTime: timeFilter } : {}),
+        },
+        orderBy: [{ slotStartTime: "asc" }],
+        ...(take ? { take } : {}),
+      });
+
+      return { count: slots.length, slots };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to get doctor available slots", 500);
     }
-
-    const take = limit ? Math.max(1, parseInt(String(limit), 10)) : undefined;
-
-    const slots = await prisma.availabilitySlot.findMany({
-      where: {
-        doctorId,
-        status: SlotStatus.AVAILABLE,
-        ...(Object.keys(timeFilter).length ? { slotStartTime: timeFilter } : {}),
-      },
-      orderBy: [{ slotStartTime: "asc" }],
-      ...(take ? { take } : {}),
-    });
-
-    return { count: slots.length, slots };
   }
 }
 

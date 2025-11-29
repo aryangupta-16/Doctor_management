@@ -6,6 +6,7 @@ import { authorizeRoles } from '../../common/middlewares/roleGuard';
 import {
   getMe, updateMe, uploadProfilePicture, changePassword, deleteMe, adminDeleteUserById
 } from './user.controller';
+import { asyncHandler } from '../../utils/asyncHandler';
 
 const router = express.Router();
 
@@ -13,21 +14,21 @@ const router = express.Router();
 // const upload = multer({ dest: 'tmp/' });
 
 // GET /users/me
-router.get('/me', authenticateJWT, getMe);
+router.get('/me', authenticateJWT, asyncHandler(getMe));
 
 // PUT /users/me
-router.put('/me', authenticateJWT, updateMe);
+router.put('/me', authenticateJWT, asyncHandler(updateMe));
 
 // POST /users/me/profile-picture
 // router.post('/me/profile-picture', authenticateJWT, upload.single('file'), uploadProfilePicture);
 
 // POST /users/me/change-password
-router.post('/me/change-password', authenticateJWT, changePassword);
+router.post('/me/change-password', authenticateJWT, asyncHandler(changePassword));
 
 // DELETE /users/me
-router.delete('/me', authenticateJWT, deleteMe);
+router.delete('/me', authenticateJWT, asyncHandler(deleteMe));
 
 // Admin delete user by id
-router.delete('/:id', authenticateJWT, authorizeRoles('ADMIN'), adminDeleteUserById);
+router.delete('/:id', authenticateJWT, authorizeRoles('ADMIN'), asyncHandler(adminDeleteUserById));
 
 export default router;

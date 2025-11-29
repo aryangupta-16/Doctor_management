@@ -1,14 +1,15 @@
 import {searchController} from "./search.controller"
 import {Router} from 'express'
+import { asyncHandler } from '../../utils/asyncHandler';
 
 const router = Router();
 
-router.get('/doctors', searchController.searchDoctors);
+router.get('/doctors', asyncHandler(searchController.searchDoctors));
 
-router.get('/specialities',searchController.getSpecialities);
+router.get('/specialities', asyncHandler(searchController.getSpecialities));
 
-router.get('/location',searchController.getLocations);
+router.get('/location', asyncHandler(searchController.getLocations));
 
-router.get('/featured',searchController.getFeaturedDoctor);
+router.get('/featured', asyncHandler(searchController.getFeaturedDoctor));
 
-export default router
+export default router;

@@ -12,6 +12,7 @@ import {
   registerDoctor
 } from './auth.controller';
 import { validateRequest } from '../../utils/validation';
+import { asyncHandler } from '../../utils/asyncHandler';
 
 const router = express.Router();
 
@@ -20,54 +21,54 @@ router.post('/register',
   body('email').isEmail(),
   body('password').isLength({ min: 8 }),
   validateRequest,
-  register
+  asyncHandler(register)
 );
 
 router.post('/register-doctor',
     body('email').isEmail(),
     body('password').isLength({min : 8}),
     validateRequest,
-    registerDoctor
+    asyncHandler(registerDoctor)
 )
 
 router.post('/login',
   body('email').isEmail(),
   body('password').exists(),
   validateRequest,
-  login
+  asyncHandler(login)
 );
 
 router.post('/refresh',
   body('refreshToken').exists(),
   validateRequest,
-  refresh
+  asyncHandler(refresh)
 );
 
 router.post('/logout',
   body('refreshToken').exists(),
   validateRequest,
-  logout
+  asyncHandler(logout)
 );
 
 router.post('/forgot-password',
   body('email').isEmail(),
   validateRequest,
-  forgotPassword
+  asyncHandler(forgotPassword)
 );
 
 router.post('/reset-password',
   body('token').exists(),
   body('newPassword').isLength({ min: 8 }),
   validateRequest,
-  resetPassword
+  asyncHandler(resetPassword)
 );
 
-router.get('/verify-email', verifyEmail);
+router.get('/verify-email', asyncHandler(verifyEmail as any));
 
 router.post('/resend-verification',
   body('email').isEmail(),
   validateRequest,
-  resendVerification
+  asyncHandler(resendVerification)
 );
 
 export default router;

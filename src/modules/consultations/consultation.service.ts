@@ -1,5 +1,6 @@
 import prisma from "../../prisma/client";
 import { ConsultationStatus, ConsultationType, SlotStatus } from "@prisma/client";
+import { AppError } from "../../utils/AppError";
 
 type Paginated = { page?: number; limit?: number };
 
@@ -52,50 +53,52 @@ async function generateConsultationNumber(): Promise<string> {
 export default class ConsultationService {
   // Book a consultation directly against an AVAILABLE slot
   static async bookConsultation(patientUserId: string, data: BookConsultationInput) {
-    const { slotId, consultationType, chiefComplaint, symptoms } = data;
+    try {
+      const { slotId, consultationType, chiefComplaint, symptoms } = data;
 
-    const slot = await prisma.availabilitySlot.findUnique({
-      where: { id: slotId },
-      include: { doctor: true },
-    });
-    if (!slot) throw new Error("Slot not found");
-    if (slot.status !== SlotStatus.AVAILABLE) throw new Error("Slot not available");
-    if (slot.slotStartTime.getTime() <= Date.now()) throw new Error("Cannot book a past slot");
+      const slot = await prisma.availabilitySlot.findUnique({
+        where: { id: slotId },
+        include: { doctor: true },
+      });
+      if (!slot) throw new AppError("Slot not found", 404);
+      if (slot.status !== SlotStatus.AVAILABLE) throw new AppError("Slot not available", 400);
+      if (slot.slotStartTime.getTime() <= Date.now()) throw new AppError("Cannot book a past slot", 400);
 
-    // Ensure patient user exists
-    const patient = await prisma.user.findUnique({ where: { id: patientUserId } });
-    if (!patient) throw new Error("Patient not found");
+      const patient = await prisma.user.findUnique({ where: { id: patientUserId } });
+      if (!patient) throw new AppError("Patient not found", 404);
 
-    const consultationNumber = await generateConsultationNumber();
+      const consultationNumber = await generateConsultationNumber();
 
-    const result = await prisma.$transaction(async (tx) => {
-      // Create consultation
-      const consultation = await tx.consultation.create({
-        data: {
-          consultationNumber,
-          patientId: patientUserId,
-          doctorId: slot.doctorId,
-          slotId: slot.id,
-          scheduledStartTime: slot.slotStartTime,
-          scheduledEndTime: slot.slotEndTime,
-          consultationType: consultationType ?? ConsultationType.VIDEO,
-          status: ConsultationStatus.SCHEDULED,
-          consultationFee: slot.doctor.consultationFee,
-          chiefComplaint: chiefComplaint ?? null,
-          symptoms: symptoms ?? null,
-        },
+      const result = await prisma.$transaction(async (tx) => {
+        const consultation = await tx.consultation.create({
+          data: {
+            consultationNumber,
+            patientId: patientUserId,
+            doctorId: slot.doctorId,
+            slotId: slot.id,
+            scheduledStartTime: slot.slotStartTime,
+            scheduledEndTime: slot.slotEndTime,
+            consultationType: consultationType ?? ConsultationType.VIDEO,
+            status: ConsultationStatus.SCHEDULED,
+            consultationFee: slot.doctor.consultationFee,
+            chiefComplaint: chiefComplaint ?? null,
+            symptoms: symptoms ?? null,
+          },
+        });
+
+        await tx.availabilitySlot.update({
+          where: { id: slot.id },
+          data: { status: SlotStatus.BOOKED, consultationId: consultation.id, reservedByUserId: null, reservedAt: null, expiresAt: null },
+        });
+
+        return consultation;
       });
 
-      // Mark slot as BOOKED and link consultation
-      await tx.availabilitySlot.update({
-        where: { id: slot.id },
-        data: { status: SlotStatus.BOOKED, consultationId: consultation.id, reservedByUserId: null, reservedAt: null, expiresAt: null },
-      });
-
-      return consultation;
-    });
-
-    return result;
+      return result;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to book consultation", 500);
+    }
   }
 
   static async getMyConsultations(
@@ -103,63 +106,72 @@ export default class ConsultationService {
     role: string,
     options: { status?: ConsultationStatus; page?: number; limit?: number }
   ) {
-    const page = Math.max(1, options.page ?? 1);
-    const take = Math.max(1, Math.min(50, options.limit ?? 10));
-    const skip = (page - 1) * take;
+    try {
+      const page = Math.max(1, options.page ?? 1);
+      const take = Math.max(1, Math.min(50, options.limit ?? 10));
+      const skip = (page - 1) * take;
 
-    console.log(role);
-    let where: any = {};
-    if (role === "PATIENT") {
-      where.patientId = userId;
-    } else if (role === "DOCTOR") {
-      const doctorId = await getDoctorIdByUserId(userId);
-      if (!doctorId) throw new Error("Doctor profile not found");
-      where.doctorId = doctorId;
-    } else {
-      throw new Error("Unauthorized role");
+      let where: any = {};
+      if (role === "PATIENT") {
+        where.patientId = userId;
+      } else if (role === "DOCTOR") {
+        const doctorId = await getDoctorIdByUserId(userId);
+        if (!doctorId) throw new AppError("Doctor profile not found", 404);
+        where.doctorId = doctorId;
+      } else {
+        throw new AppError("Unauthorized role", 403);
+      }
+
+      if (options.status) where.status = options.status;
+
+      const [total, items] = await Promise.all([
+        prisma.consultation.count({ where }),
+        prisma.consultation.findMany({
+          where,
+          orderBy: { scheduledStartTime: "desc" },
+          skip,
+          take,
+          include: {
+            doctor: { select: { id: true, userId: true, specialtyPrimary: true, consultationFee: true } },
+            patient: { select: { id: true, firstName: true, lastName: true } },
+            slot: true,
+            prescriptions: true,
+          },
+        }),
+      ]);
+
+      return { page, limit: take, total, items };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to fetch consultations", 500);
     }
-
-    if (options.status) where.status = options.status;
-
-    const [total, items] = await Promise.all([
-      prisma.consultation.count({ where }),
-      prisma.consultation.findMany({
-        where,
-        orderBy: { scheduledStartTime: "desc" },
-        skip,
-        take,
-        include: {
-          doctor: { select: { id: true, userId: true, specialtyPrimary: true, consultationFee: true } },
-          patient: { select: { id: true, firstName: true, lastName: true } },
-          slot: true,
-          prescriptions: true,
-        },
-      }),
-    ]);
-
-    return { page, limit: take, total, items };
   }
 
   static async getConsultationById(id: string, userId: string, role: string) {
-    const c = await prisma.consultation.findUnique({
-      where: { id },
-      include: {
-        doctor: true,
-        patient: true,
-        slot: true,
-        prescriptions: true,
-        payment: true,
-      },
-    });
-    if (!c) throw new Error("Consultation not found");
+    try {
+      const c = await prisma.consultation.findUnique({
+        where: { id },
+        include: {
+          doctor: true,
+          patient: true,
+          slot: true,
+          prescriptions: true,
+          payment: true,
+        },
+      });
+      if (!c) throw new AppError("Consultation not found", 404);
 
-    if (role === "PATIENT" && c.patientId !== userId) throw new Error("Forbidden");
-    if (role === "DOCTOR") {
-      const doctorId = await getDoctorIdByUserId(userId);
-      if (!doctorId || c.doctorId !== doctorId) throw new Error("Forbidden");
+      if (role === "PATIENT" && c.patientId !== userId) throw new AppError("Forbidden", 403);
+      if (role === "DOCTOR") {
+        const doctorId = await getDoctorIdByUserId(userId);
+        if (!doctorId || c.doctorId !== doctorId) throw new AppError("Forbidden", 403);
+      }
+
+      return c;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to get consultation", 500);
     }
-
-    return c;
   }
 
   static async cancelConsultation(
@@ -168,44 +180,46 @@ export default class ConsultationService {
     role: string,
     _input: CancelInput
   ) {
-    const consultation = await prisma.consultation.findUnique({ where: { id } });
-    if (!consultation) throw new Error("Consultation not found");
+    try {
+      const consultation = await prisma.consultation.findUnique({ where: { id } });
+      if (!consultation) throw new AppError("Consultation not found", 404);
 
-    // Auth: patient or doctor who owns
-    if (role === "PATIENT" && consultation.patientId !== userId) throw new Error("Forbidden");
-    if (role === "DOCTOR") {
-      const doctorId = await getDoctorIdByUserId(userId);
-      if (!doctorId || consultation.doctorId !== doctorId) throw new Error("Forbidden");
-    }
+      if (role === "PATIENT" && consultation.patientId !== userId) throw new AppError("Forbidden", 403);
+      if (role === "DOCTOR") {
+        const doctorId = await getDoctorIdByUserId(userId);
+        if (!doctorId || consultation.doctorId !== doctorId) throw new AppError("Forbidden", 403);
+      }
 
-    if (
-      consultation.status === ConsultationStatus.COMPLETED ||
-      consultation.status === ConsultationStatus.CANCELLED
-    ) {
-      throw new Error("Consultation cannot be cancelled");
-    }
+      if (
+        consultation.status === ConsultationStatus.COMPLETED ||
+        consultation.status === ConsultationStatus.CANCELLED
+      ) {
+        throw new AppError("Consultation cannot be cancelled", 400);
+      }
 
-    const updated = await prisma.$transaction(async (tx) => {
-      // Set consultation to CANCELLED
-      const cons = await tx.consultation.update({
-        where: { id },
-        data: { status: ConsultationStatus.CANCELLED },
+      const updated = await prisma.$transaction(async (tx) => {
+        const cons = await tx.consultation.update({
+          where: { id },
+          data: { status: ConsultationStatus.CANCELLED },
+        });
+
+        if (cons.slotId) {
+          const slot = await tx.availabilitySlot.findUnique({ where: { id: cons.slotId } });
+          if (slot) {
+            await tx.availabilitySlot.update({
+              where: { id: slot.id },
+              data: { status: SlotStatus.AVAILABLE, consultationId: null, reservedByUserId: null, reservedAt: null, expiresAt: null },
+            });
+          }
+        }
+        return cons;
       });
 
-      // Free the associated slot if exists and is BOOKED/RESERVED
-      if (cons.slotId) {
-        const slot = await tx.availabilitySlot.findUnique({ where: { id: cons.slotId } });
-        if (slot) {
-          await tx.availabilitySlot.update({
-            where: { id: slot.id },
-            data: { status: SlotStatus.AVAILABLE, consultationId: null, reservedByUserId: null, reservedAt: null, expiresAt: null },
-          });
-        }
-      }
-      return cons;
-    });
-
-    return updated;
+      return updated;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to cancel consultation", 500);
+    }
   }
 
   static async rescheduleConsultation(
@@ -214,116 +228,127 @@ export default class ConsultationService {
     role: string,
     input: RescheduleInput
   ) {
-    const { newSlotId } = input;
-    const consultation = await prisma.consultation.findUnique({ where: { id } });
-    if (!consultation) throw new Error("Consultation not found");
+    try {
+      const { newSlotId } = input;
+      const consultation = await prisma.consultation.findUnique({ where: { id } });
+      if (!consultation) throw new AppError("Consultation not found", 404);
 
-    // Auth
-    if (role === "PATIENT" && consultation.patientId !== userId) throw new Error("Forbidden");
-    if (role === "DOCTOR") {
-      const doctorId = await getDoctorIdByUserId(userId);
-      if (!doctorId || consultation.doctorId !== doctorId) throw new Error("Forbidden");
-    }
-
-    if (consultation.status === ConsultationStatus.COMPLETED)
-      throw new Error("Completed consultations cannot be rescheduled");
-
-    const newSlot = await prisma.availabilitySlot.findUnique({ where: { id: newSlotId } });
-    if (!newSlot) throw new Error("New slot not found");
-    if (newSlot.status !== SlotStatus.AVAILABLE) throw new Error("New slot is not available");
-    if (newSlot.doctorId !== consultation.doctorId) throw new Error("Slot must belong to the same doctor");
-
-    const updated = await prisma.$transaction(async (tx) => {
-      // Free previous slot
-      if (consultation.slotId) {
-        await tx.availabilitySlot.update({
-          where: { id: consultation.slotId },
-          data: { status: SlotStatus.AVAILABLE, consultationId: null },
-        });
+      if (role === "PATIENT" && consultation.patientId !== userId) throw new AppError("Forbidden", 403);
+      if (role === "DOCTOR") {
+        const doctorId = await getDoctorIdByUserId(userId);
+        if (!doctorId || consultation.doctorId !== doctorId) throw new AppError("Forbidden", 403);
       }
 
-      // Link new slot and mark it booked
-      const cons = await tx.consultation.update({
-        where: { id },
-        data: {
-          slotId: newSlot.id,
-          scheduledStartTime: newSlot.slotStartTime,
-          scheduledEndTime: newSlot.slotEndTime,
-          status: ConsultationStatus.SCHEDULED,
-        },
+      if (consultation.status === ConsultationStatus.COMPLETED)
+        throw new AppError("Completed consultations cannot be rescheduled", 400);
+
+      const newSlot = await prisma.availabilitySlot.findUnique({ where: { id: newSlotId } });
+      if (!newSlot) throw new AppError("New slot not found", 404);
+      if (newSlot.status !== SlotStatus.AVAILABLE) throw new AppError("New slot is not available", 400);
+      if (newSlot.doctorId !== consultation.doctorId) throw new AppError("Slot must belong to the same doctor", 400);
+
+      const updated = await prisma.$transaction(async (tx) => {
+        if (consultation.slotId) {
+          await tx.availabilitySlot.update({
+            where: { id: consultation.slotId },
+            data: { status: SlotStatus.AVAILABLE, consultationId: null },
+          });
+        }
+
+        const cons = await tx.consultation.update({
+          where: { id },
+          data: {
+            slotId: newSlot.id,
+            scheduledStartTime: newSlot.slotStartTime,
+            scheduledEndTime: newSlot.slotEndTime,
+            status: ConsultationStatus.SCHEDULED,
+          },
+        });
+
+        await tx.availabilitySlot.update({
+          where: { id: newSlot.id },
+          data: { status: SlotStatus.BOOKED, consultationId: cons.id },
+        });
+
+        return cons;
       });
 
-      await tx.availabilitySlot.update({
-        where: { id: newSlot.id },
-        data: { status: SlotStatus.BOOKED, consultationId: cons.id },
-      });
-
-      return cons;
-    });
-
-    return updated;
+      return updated;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to reschedule consultation", 500);
+    }
   }
 
   static async startConsultation(id: string, doctorUserId: string) {
-    const doctorId = await getDoctorIdByUserId(doctorUserId);
-    if (!doctorId) throw new Error("Doctor profile not found");
+    try {
+      const doctorId = await getDoctorIdByUserId(doctorUserId);
+      if (!doctorId) throw new AppError("Doctor profile not found", 404);
 
-    const consultation = await prisma.consultation.findUnique({ where: { id } });
-    if (!consultation) throw new Error("Consultation not found");
-    if (consultation.doctorId !== doctorId) throw new Error("Forbidden");
-    if (consultation.status !== ConsultationStatus.SCHEDULED)
-      throw new Error("Only scheduled consultations can be started");
+      const consultation = await prisma.consultation.findUnique({ where: { id } });
+      if (!consultation) throw new AppError("Consultation not found", 404);
+      if (consultation.doctorId !== doctorId) throw new AppError("Forbidden", 403);
+      if (consultation.status !== ConsultationStatus.SCHEDULED)
+        throw new AppError("Only scheduled consultations can be started", 400);
 
-    const now = new Date();
-    const updated = await prisma.consultation.update({
-      where: { id },
-      data: { status: ConsultationStatus.IN_PROGRESS, actualStartTime: now },
-    });
-    return updated;
+      const now = new Date();
+      const updated = await prisma.consultation.update({
+        where: { id },
+        data: { status: ConsultationStatus.IN_PROGRESS, actualStartTime: now },
+      });
+      return updated;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to start consultation", 500);
+    }
   }
 
   static async completeConsultation(id: string, doctorUserId: string, input: CompleteInput) {
-    const doctorId = await getDoctorIdByUserId(doctorUserId);
-    if (!doctorId) throw new Error("Doctor profile not found");
+    try {
+      const doctorId = await getDoctorIdByUserId(doctorUserId);
+      if (!doctorId) throw new AppError("Doctor profile not found", 404);
 
-    const consultation = await prisma.consultation.findUnique({ where: { id } });
-    if (!consultation) throw new Error("Consultation not found");
-    if (consultation.doctorId !== doctorId) throw new Error("Forbidden");
-    if (
-      !(
-        consultation.status === ConsultationStatus.SCHEDULED ||
-        consultation.status === ConsultationStatus.IN_PROGRESS
+      const consultation = await prisma.consultation.findUnique({ where: { id } });
+      if (!consultation) throw new AppError("Consultation not found", 404);
+      if (consultation.doctorId !== doctorId) throw new AppError("Forbidden", 403);
+      if (
+        !(
+          consultation.status === ConsultationStatus.SCHEDULED ||
+          consultation.status === ConsultationStatus.IN_PROGRESS
+        )
       )
-    )
-      throw new Error("Consultation cannot be completed");
+        throw new AppError("Consultation cannot be completed", 400);
 
-    const now = new Date();
-    const followUpDate = input.folllowUpDate ? new Date(input.folllowUpDate) : null;
+      const now = new Date();
+      const followUpDate = input.folllowUpDate ? new Date(input.folllowUpDate) : null;
 
-    const updated = await prisma.$transaction(async (tx) => {
-      const cons = await tx.consultation.update({
-        where: { id },
-        data: {
-          status: ConsultationStatus.COMPLETED,
-          actualEndTime: now,
-          diagnosis: input.diagnosis ?? null,
-          doctorNotes: input.doctorNotes ?? null,
-          followUpRequired: input.followUpRequired ?? false,
-          followUpDate,
-        },
+      const updated = await prisma.$transaction(async (tx) => {
+        const cons = await tx.consultation.update({
+          where: { id },
+          data: {
+            status: ConsultationStatus.COMPLETED,
+            actualEndTime: now,
+            diagnosis: input.diagnosis ?? null,
+            doctorNotes: input.doctorNotes ?? null,
+            followUpRequired: input.followUpRequired ?? false,
+            followUpDate,
+          },
+        });
+
+        if (cons.slotId) {
+          await tx.availabilitySlot.update({
+            where: { id: cons.slotId },
+            data: { status: SlotStatus.COMPLETED },
+          });
+        }
+        return cons;
       });
 
-      // Mark slot as COMPLETED as well
-      if (cons.slotId) {
-        await tx.availabilitySlot.update({
-          where: { id: cons.slotId },
-          data: { status: SlotStatus.COMPLETED },
-        });
-      }
-      return cons;
-    });
-
-    return updated;
+      return updated;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to complete consultation", 500);
+    }
   }
 
   static async updateConsultationNotes(
@@ -331,18 +356,23 @@ export default class ConsultationService {
     doctorUserId: string,
     input: { doctorNotes?: string | null }
   ) {
-    const doctorId = await getDoctorIdByUserId(doctorUserId);
-    if (!doctorId) throw new Error("Doctor profile not found");
+    try {
+      const doctorId = await getDoctorIdByUserId(doctorUserId);
+      if (!doctorId) throw new AppError("Doctor profile not found", 404);
 
-    const consultation = await prisma.consultation.findUnique({ where: { id } });
-    if (!consultation) throw new Error("Consultation not found");
-    if (consultation.doctorId !== doctorId) throw new Error("Forbidden");
+      const consultation = await prisma.consultation.findUnique({ where: { id } });
+      if (!consultation) throw new AppError("Consultation not found", 404);
+      if (consultation.doctorId !== doctorId) throw new AppError("Forbidden", 403);
 
-    const updated = await prisma.consultation.update({
-      where: { id },
-      data: { doctorNotes: input.doctorNotes ?? null },
-    });
-    return updated;
+      const updated = await prisma.consultation.update({
+        where: { id },
+        data: { doctorNotes: input.doctorNotes ?? null },
+      });
+      return updated;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to update consultation notes", 500);
+    }
   }
 }
 

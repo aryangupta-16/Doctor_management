@@ -8,176 +8,191 @@ import redis from '../../lib/redis';
 import { emailProducer } from '../../common/queue/email.producer.service';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../../config/logger';
+import { AppError } from '../../utils/AppError';
 
 export class AuthService {
   // Register user: create user + profile, email verification email sent
   static async register(data: { email: string; password: string; firstName?: string; lastName?: string; phoneNumber?: string }) {
-    const { email, password, firstName, lastName, phoneNumber } = data;
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) throw new Error('EMAIL_EXISTS');
+    try {
+      const { email, password, firstName, lastName, phoneNumber } = data;
+      const existing = await prisma.user.findUnique({ where: { email } });
+      if (existing) {
+        throw new AppError('Email already exists', 400);
+      }
 
-    const passwordHash = await hashPassword(password);
+      const passwordHash = await hashPassword(password);
 
-    const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash,
-        firstName: firstName || '',
-        lastName: lastName || '',
-        phoneNumber: phoneNumber || null,
-        role: RoleType.PATIENT,
-        // default emailVerified false
-        profile: {
-          create: {
-            // create empty profile
+      const user = await prisma.user.create({
+        data: {
+          email,
+          passwordHash,
+          firstName: firstName || '',
+          lastName: lastName || '',
+          phoneNumber: phoneNumber || null,
+          role: RoleType.PATIENT,
+          profile: {
+            create: {
+            },
           },
         },
-      },
-    });
+      });
 
-    // Create session entry for refresh tokens will be created on login
-    await prisma.auditLog.create({ data: { userId: user.id, action: 'CREATE', entityType: 'User', entityId: user.id } });
+      await prisma.auditLog.create({ data: { userId: user.id, action: 'CREATE', entityType: 'User', entityId: user.id } });
 
-    // Send email verification token (signed JWT)
-    const emailToken = signEmailToken({ sub: user.id, type: 'email_verification' });
-    const verifyUrl = `${config.appBaseUrl}/api/auth/verify-email?token=${emailToken}`;
-    const html = `<p>Hello ${user.firstName || user.email},</p>
-      <p>Please verify your email by clicking <a href="${verifyUrl}">here</a>.</p>
-      <p>If you did not sign up, ignore this email.</p>`;
+      const emailToken = signEmailToken({ sub: user.id, type: 'email_verification' });
+      const verifyUrl = `${config.appBaseUrl}/api/auth/verify-email?token=${emailToken}`;
+      const html = `<p>Hello ${user.firstName || user.email},</p>
+        <p>Please verify your email by clicking <a href="${verifyUrl}">here</a>.</p>
+        <p>If you did not sign up, ignore this email.</p>`;
 
-    await emailProducer.queueVerificationEmail(user.email, emailToken, html, `Verify: ${verifyUrl}`);
+      await emailProducer.queueVerificationEmail(user.email, emailToken, html, `Verify: ${verifyUrl}`);
 
-    return { id: user.id, email: user.email };
+      return { id: user.id, email: user.email };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError('Failed to register user', 500);
+    }
   }
 
 
   static async registerDoctor(data: { email: string; password: string; firstName?: string; lastName?: string; phoneNumber?: string, licenseNumber?: string,specialtyPrimary?: string, yearsOfExperience?: number, consultationFee?: number }) {
-    const { email, password, firstName, lastName, phoneNumber, licenseNumber,specialtyPrimary, yearsOfExperience, consultationFee } = data;
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) throw new Error('EMAIL_EXISTS');
+    try {
+      const { email, password, firstName, lastName, phoneNumber, licenseNumber,specialtyPrimary, yearsOfExperience, consultationFee } = data;
+      const existing = await prisma.user.findUnique({ where: { email } });
+      if (existing) {
+        throw new AppError('Email already exists', 400);
+      }
 
-    const existingDoctor = await prisma.doctor.findUnique({where: {licenseNumber: licenseNumber}})
+      const existingDoctor = await prisma.doctor.findUnique({where: {licenseNumber: licenseNumber}})
 
-    if(existingDoctor){
-        throw new Error('Doctor with this registration number already exist');
-    }
-    const passwordHash = await hashPassword(password);
+      if(existingDoctor){
+          throw new AppError('Doctor with this registration number already exists', 400);
+      }
+      const passwordHash = await hashPassword(password);
 
-    const user = await prisma.user.create({
-      data: {
-        email,
-        passwordHash,
-        firstName: firstName || '',
-        lastName: lastName || '',
-        phoneNumber: phoneNumber || null,
-        role: RoleType.DOCTOR,
-        // default emailVerified false
-        doctor: {
-          create: {
-            licenseNumber : licenseNumber || '',
-            specialtyPrimary: specialtyPrimary || '', 
-            yearsOfExperience: yearsOfExperience || 0, 
-            consultationFee: consultationFee || 500
+      const user = await prisma.user.create({
+        data: {
+          email,
+          passwordHash,
+          firstName: firstName || '',
+          lastName: lastName || '',
+          phoneNumber: phoneNumber || null,
+          role: RoleType.DOCTOR,
+          doctor: {
+            create: {
+              licenseNumber : licenseNumber || '',
+              specialtyPrimary: specialtyPrimary || '', 
+              yearsOfExperience: yearsOfExperience || 0, 
+              consultationFee: consultationFee || 500
+            },
           },
         },
-      },
-      include: {
-        doctor: true,
-      }
-    });
+        include: {
+          doctor: true,
+        }
+      });
 
-    // Create session entry for refresh tokens will be created on login
-    await prisma.auditLog.create({ data: { userId: user.id, action: 'CREATE', entityType: 'User', entityId: user.id } });
+      await prisma.auditLog.create({ data: { userId: user.id, action: 'CREATE', entityType: 'User', entityId: user.id } });
 
-    // Send email verification token (signed JWT)
-    const emailToken = signEmailToken({ sub: user.id, type: 'email_verification' });
-    const verifyUrl = `${config.appBaseUrl}/api/auth/verify-email?token=${emailToken}`;
-    const html = `<p>Hello ${user.firstName || user.email},</p>
-      <p>Please verify your email by clicking <a href="${verifyUrl}">here</a>.</p>
-      <p>If you did not sign up, ignore this email.</p>`;
+      const emailToken = signEmailToken({ sub: user.id, type: 'email_verification' });
+      const verifyUrl = `${config.appBaseUrl}/api/auth/verify-email?token=${emailToken}`;
+      const html = `<p>Hello ${user.firstName || user.email},</p>
+        <p>Please verify your email by clicking <a href="${verifyUrl}">here</a>.</p>
+        <p>If you did not sign up, ignore this email.</p>`;
 
-    await emailProducer.queueVerificationEmail(user.email, emailToken, html, `Verify: ${verifyUrl}`);
+      await emailProducer.queueVerificationEmail(user.email, emailToken, html, `Verify: ${verifyUrl}`);
 
-    return { id: user.id, email: user.email };
+      return { id: user.id, email: user.email };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError('Failed to register doctor', 500);
+    }
   }
 
   // Login: validate password, update last login, create refresh token session
   static async login({ email, password, deviceInfo }: { email: string; password: string; deviceInfo?: any }) {
-    const user = await prisma.user.findUnique({ where: { email }, include: {
-        doctor : true
-    }});
-    if (!user) throw new Error('INVALID_CREDENTIALS');
+    try {
+      const user = await prisma.user.findUnique({ where: { email }, include: {
+          doctor : true
+      }});
+      if (!user) {
+        throw new AppError('Invalid credentials', 401);
+      }
 
-    if(user.role === RoleType.DOCTOR && user.doctor){
-        if(!user.doctor.isVerified){
-            throw new Error('Your account is pending for admin Approval')
-        }
+      if(user.role === RoleType.DOCTOR && user.doctor){
+          if(!user.doctor.isVerified){
+              throw new AppError('Your account is pending for admin approval', 403);
+          }
+      }
+
+      const ok = await comparePassword(password, user.passwordHash);
+
+      if (!ok) {
+        await prisma.auditLog.create({ data: { userId: user.id, action: 'ACCESS', entityType: 'User', entityId: user.id, metadata: { failedLogin: true } } });
+        throw new AppError('Invalid credentials', 401);
+      }
+
+      await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+      await prisma.auditLog.create({ data: { userId: user.id, action: 'LOGIN', entityType: 'User', entityId: user.id } });
+      
+      const accessToken = signAccessToken({ sub: user.id, roles: user.role});
+      const refreshToken = signRefreshToken({ sub: user.id, roles: user.role});
+
+      await prisma.userSession.create({
+        data: {
+          userId: user.id,
+          token: uuidv4(),
+          refreshToken,
+          deviceInfo: deviceInfo || {},
+          expiresAt: new Date(Date.now() + AuthService.msFromDuration(config.jwtRefreshExpiry)),
+        },
+      });
+
+      return { accessToken, refreshToken, user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName } };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError('Failed to login', 500);
     }
-
-    const ok = await comparePassword(password, user.passwordHash);
-
-    if (!ok) {
-      // log failed login attempt
-      await prisma.auditLog.create({ data: { userId: user.id, action: 'ACCESS', entityType: 'User', entityId: user.id, metadata: { failedLogin: true } } });
-      throw new Error('INVALID_CREDENTIALS');
-    }
-
-    // update lastLoginAt
-    await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-    await prisma.auditLog.create({ data: { userId: user.id, action: 'LOGIN', entityType: 'User', entityId: user.id } });
-    
-    // Create tokens
-    const accessToken = signAccessToken({ sub: user.id, roles: user.role});
-    const refreshToken = signRefreshToken({ sub: user.id, roles: user.role});
-
-    // Save refresh token in UserSession
-    const session = await prisma.userSession.create({
-      data: {
-        userId: user.id,
-        token: uuidv4(), // token identifier separate from JWT (so we can revoke quickly)
-        refreshToken,
-        deviceInfo: deviceInfo || {},
-        expiresAt: new Date(Date.now() + AuthService.msFromDuration(config.jwtRefreshExpiry)),
-      },
-    });
-
-    return { accessToken, refreshToken, user: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName } };
   }
 
   // Refresh: verify refresh JWT and ensure it matches DB-stored refresh token
   static async refresh({ refreshToken }: { refreshToken: string }) {
-    // verify JWT
-    let payload: any;
     try {
-      payload = verifyToken(refreshToken);
-    } catch (err) {
-      throw new Error('INVALID_REFRESH');
+      let payload: any;
+      try {
+        payload = verifyToken(refreshToken);
+      } catch (err) {
+        throw new AppError('Invalid refresh token', 401);
+      }
+      const userId = payload.sub;
+
+      const session = await prisma.userSession.findFirst({ where: { userId, refreshToken } });
+      if (!session) {
+        throw new AppError('Invalid refresh token', 401);
+      }
+
+      await prisma.userSession.delete({ where: { id: session.id } });
+
+      const newRefreshToken = signRefreshToken({ sub: userId, role: payload.role });
+      const newAccessToken = signAccessToken({ sub: userId, role: payload.role });
+
+      await prisma.userSession.create({
+        data: {
+          userId,
+          token: uuidv4(),
+          refreshToken: newRefreshToken,
+          deviceInfo: session.deviceInfo as Prisma.InputJsonValue,
+          expiresAt: new Date(Date.now() + AuthService.msFromDuration(config.jwtRefreshExpiry)),
+        },
+      });
+
+      await prisma.auditLog.create({ data: { userId, action: 'ACCESS', entityType: 'User', entityId: userId, metadata: { rotatedRefresh: true } } });
+
+      return { accessToken: newAccessToken, refreshToken: newRefreshToken };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError('Failed to refresh token', 500);
     }
-    const userId = payload.sub;
-
-    // check DB for a session with this refresh token
-    const session = await prisma.userSession.findFirst({ where: { userId, refreshToken } });
-    if (!session) throw new Error('INVALID_REFRESH');
-
-    // rotate: delete old session and create new
-    await prisma.userSession.delete({ where: { id: session.id } });
-
-    const newRefreshToken = signRefreshToken({ sub: userId, role: payload.role });
-    const newAccessToken = signAccessToken({ sub: userId, role: payload.role });
-
-    const newSession = await prisma.userSession.create({
-      data: {
-        userId,
-        token: uuidv4(),
-        refreshToken: newRefreshToken,
-        deviceInfo: session.deviceInfo as Prisma.InputJsonValue,
-        expiresAt: new Date(Date.now() + AuthService.msFromDuration(config.jwtRefreshExpiry)),
-      },
-    });
-
-    await prisma.auditLog.create({ data: { userId, action: 'ACCESS', entityType: 'User', entityId: userId, metadata: { rotatedRefresh: true } } });
-
-    return { accessToken: newAccessToken, refreshToken: newRefreshToken };
   }
 
   // Logout: revoke refresh token (delete session)
