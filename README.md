@@ -8,3 +8,5 @@ npx prisma studio
 npm run dev
 
 npm run worker:email
+
+npm run seed for database creation
