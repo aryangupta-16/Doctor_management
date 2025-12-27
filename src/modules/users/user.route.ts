@@ -4,7 +4,7 @@ import multer from 'multer';
 import { authenticateJWT } from '../../middleware/auth.middleware';
 import { authorizeRoles } from '../../common/middlewares/roleGuard';
 import {
-  getMe, updateMe, uploadProfilePicture, changePassword, deleteMe, adminDeleteUserById
+  getMe, updateMe, uploadProfilePicture, changePassword, deleteMe, getUserById, adminDeleteUserById
 } from './user.controller';
 import { asyncHandler } from '../../utils/asyncHandler';
 
@@ -15,6 +15,9 @@ const router = express.Router();
 
 // GET /users/me
 router.get('/me', authenticateJWT, asyncHandler(getMe));
+
+// GET /users/:id
+router.get('/:id', authenticateJWT, asyncHandler(getUserById));
 
 // PUT /users/me
 router.put('/me', authenticateJWT, asyncHandler(updateMe));

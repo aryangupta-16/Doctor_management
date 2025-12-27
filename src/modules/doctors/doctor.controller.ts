@@ -5,6 +5,7 @@ import { DoctorService } from './doctor.service';
 export class DoctorController {
   static async getDoctorById(req: Request, res: Response) {
     const { doctorId } = req.params;
+    console.log("Doctor ID:", doctorId);
     const result = await DoctorService.getDoctorById(doctorId);
     
     return res.json({ success: true, doctor: result });

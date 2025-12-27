@@ -133,5 +133,93 @@ export default class ConsultationController {
     return res.json({ success: true, data: result });
   }
 
+  // ====== NEW METHODS FOR ADMIN, PATIENTS, AND DOCTORS ======
+
+  // ADMIN: Get all consultations with filters
+  static async getAllConsultations(req: Request, res: Response) {
+    const { status, page, limit, patientId, doctorId, startDate, endDate } = req.query;
+
+    const result = await ConsultationService.getAllConsultations({
+      status: status as ConsultationStatus,
+      page: page ? parseInt(page as string) : 1,
+      limit: limit ? parseInt(limit as string) : 10,
+      patientId: patientId as string,
+      doctorId: doctorId as string,
+      startDate: startDate ? new Date(startDate as string) : undefined,
+      endDate: endDate ? new Date(endDate as string) : undefined,
+    });
+    return res.json({ success: true, data: result });
+  }
+
+  // PATIENT: Get patient's consultations
+  static async getPatientConsultations(req: Request, res: Response) {
+    const patientId = (req as any).user.sub;
+    const { status, page, limit, doctorId, startDate, endDate } = req.query;
+
+    const result = await ConsultationService.getPatientConsultations(patientId, {
+      status: status as ConsultationStatus,
+      page: page ? parseInt(page as string) : 1,
+      limit: limit ? parseInt(limit as string) : 10,
+      doctorId: doctorId as string,
+      startDate: startDate ? new Date(startDate as string) : undefined,
+      endDate: endDate ? new Date(endDate as string) : undefined,
+    });
+    return res.json({ success: true, data: result });
+  }
+
+  // DOCTOR: Get doctor's consultations
+  static async getDoctorConsultations(req: Request, res: Response) {
+    const doctorUserId = (req as any).user.sub;
+    const { status, page, limit, startDate, endDate } = req.query;
+
+    const result = await ConsultationService.getDoctorConsultations(doctorUserId, {
+      status: status as ConsultationStatus,
+      page: page ? parseInt(page as string) : 1,
+      limit: limit ? parseInt(limit as string) : 10,
+      startDate: startDate ? new Date(startDate as string) : undefined,
+      endDate: endDate ? new Date(endDate as string) : undefined,
+    });
+    return res.json({ success: true, data: result });
+  }
+
+  // Get pending consultations (not started)
+  static async getPendingConsultations(req: Request, res: Response) {
+    const doctorUserId = (req as any).user.sub;
+    const { page, limit } = req.query;
+
+    const result = await ConsultationService.getPendingConsultations(doctorUserId, {
+      page: page ? parseInt(page as string) : 1,
+      limit: limit ? parseInt(limit as string) : 10,
+    });
+    return res.json({ success: true, data: result });
+  }
+
+  // Get upcoming consultations (for both patient and doctor)
+  static async getUpcomingConsultations(req: Request, res: Response) {
+    const userId = (req as any).user.sub;
+    const role = (req as any).user.roles;
+    const { page, limit } = req.query;
+
+    const result = await ConsultationService.getUpcomingConsultations(userId, role, {
+      page: page ? parseInt(page as string) : 1,
+      limit: limit ? parseInt(limit as string) : 10,
+    });
+    return res.json({ success: true, data: result });
+  }
+
+  // Get completed consultations
+  static async getCompletedConsultations(req: Request, res: Response) {
+    const userId = (req as any).user.sub;
+    const role = (req as any).user.roles;
+    const { page, limit, startDate, endDate } = req.query;
+
+    const result = await ConsultationService.getCompletedConsultations(userId, role, {
+      page: page ? parseInt(page as string) : 1,
+      limit: limit ? parseInt(limit as string) : 10,
+      startDate: startDate ? new Date(startDate as string) : undefined,
+      endDate: endDate ? new Date(endDate as string) : undefined,
+    });
+    return res.json({ success: true, data: result });
+  }
 
 }

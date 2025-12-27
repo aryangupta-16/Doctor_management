@@ -35,6 +35,13 @@ export async function deleteMe(req: Request, res: Response) {
   return res.json({ success: true, message: 'Account deleted permanently' });
 }
 
+// Get user by id
+export async function getUserById(req: Request, res: Response) {
+  const { id } = req.params;
+  const user = await UserService.getUserById(id);
+  return res.json({ success: true, data: user });
+}
+
 // Admin delete by id
 export async function adminDeleteUserById(req: Request, res: Response) {
   const requesterId = (req as any).user?.sub;

@@ -374,5 +374,320 @@ export default class ConsultationService {
       throw new AppError("Failed to update consultation notes", 500);
     }
   }
+
+  // ====== NEW METHODS FOR ADMIN, PATIENTS, AND DOCTORS ======
+
+  // ADMIN: Get all consultations with filters
+  static async getAllConsultations(options: {
+    status?: ConsultationStatus;
+    page?: number;
+    limit?: number;
+    patientId?: string;
+    doctorId?: string;
+    startDate?: Date;
+    endDate?: Date;
+  }) {
+    try {
+      const page = Math.max(1, options.page ?? 1);
+      const take = Math.max(1, Math.min(100, options.limit ?? 10));
+      const skip = (page - 1) * take;
+
+      const where: any = {};
+      if (options.status) where.status = options.status;
+      if (options.patientId) where.patientId = options.patientId;
+      if (options.doctorId) where.doctorId = options.doctorId;
+      if (options.startDate || options.endDate) {
+        where.scheduledStartTime = {};
+        if (options.startDate) where.scheduledStartTime.gte = options.startDate;
+        if (options.endDate) where.scheduledStartTime.lte = options.endDate;
+      }
+
+      const [total, items] = await Promise.all([
+        prisma.consultation.count({ where }),
+        prisma.consultation.findMany({
+          where,
+          orderBy: { scheduledStartTime: "desc" },
+          skip,
+          take,
+          include: {
+            doctor: { select: { id: true, userId: true, user: { select: { firstName: true, lastName: true } }, specialtyPrimary: true } },
+            patient: { select: { id: true, firstName: true, lastName: true, email: true } },
+            payment: { select: { id: true, status: true, amount: true } },
+            prescriptions: { select: { id: true } },
+          },
+        }),
+      ]);
+
+      return { page, limit: take, total, items };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to fetch consultations", 500);
+    }
+  }
+
+  // PATIENT: Get patient's consultations with filters
+  static async getPatientConsultations(
+    patientId: string,
+    options: {
+      status?: ConsultationStatus;
+      page?: number;
+      limit?: number;
+      doctorId?: string;
+      startDate?: Date;
+      endDate?: Date;
+    }
+  ) {
+    try {
+      const page = Math.max(1, options.page ?? 1);
+      const take = Math.max(1, Math.min(50, options.limit ?? 10));
+      const skip = (page - 1) * take;
+
+      const where: any = { patientId };
+      if (options.status) where.status = options.status;
+      if (options.doctorId) where.doctorId = options.doctorId;
+      if (options.startDate || options.endDate) {
+        where.scheduledStartTime = {};
+        if (options.startDate) where.scheduledStartTime.gte = options.startDate;
+        if (options.endDate) where.scheduledStartTime.lte = options.endDate;
+      }
+
+      const [total, items] = await Promise.all([
+        prisma.consultation.count({ where }),
+        prisma.consultation.findMany({
+          where,
+          orderBy: { scheduledStartTime: "desc" },
+          skip,
+          take,
+          include: {
+            doctor: {
+              select: {
+                id: true,
+                user: { select: { firstName: true, lastName: true, profilePicture: true } },
+                specialtyPrimary: true,
+                averageRating: true,
+              },
+            },
+            payment: { select: { id: true, status: true, amount: true } },
+            prescriptions: { select: { id: true, prescriptionNumber: true } },
+          },
+        }),
+      ]);
+
+      return { page, limit: take, total, items };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to fetch patient consultations", 500);
+    }
+  }
+
+  // DOCTOR: Get doctor's consultations with filters
+  static async getDoctorConsultations(
+    doctorUserId: string,
+    options: {
+      status?: ConsultationStatus;
+      page?: number;
+      limit?: number;
+      startDate?: Date;
+      endDate?: Date;
+    }
+  ) {
+    try {
+      const doctorId = await getDoctorIdByUserId(doctorUserId);
+      if (!doctorId) throw new AppError("Doctor profile not found", 404);
+
+      const page = Math.max(1, options.page ?? 1);
+      const take = Math.max(1, Math.min(50, options.limit ?? 10));
+      const skip = (page - 1) * take;
+
+      const where: any = { doctorId };
+      if (options.status) where.status = options.status;
+      if (options.startDate || options.endDate) {
+        where.scheduledStartTime = {};
+        if (options.startDate) where.scheduledStartTime.gte = options.startDate;
+        if (options.endDate) where.scheduledStartTime.lte = options.endDate;
+      }
+
+      const [total, items] = await Promise.all([
+        prisma.consultation.count({ where }),
+        prisma.consultation.findMany({
+          where,
+          orderBy: { scheduledStartTime: "desc" },
+          skip,
+          take,
+          include: {
+            patient: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phoneNumber: true,
+                profilePicture: true,
+              },
+            },
+            payment: { select: { id: true, status: true, amount: true } },
+            prescriptions: true,
+          },
+        }),
+      ]);
+
+      return { page, limit: take, total, items };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to fetch doctor consultations", 500);
+    }
+  }
+
+  // Get pending consultations (SCHEDULED status)
+  static async getPendingConsultations(
+    doctorUserId: string,
+    options: { page?: number; limit?: number }
+  ) {
+    try {
+      const doctorId = await getDoctorIdByUserId(doctorUserId);
+      if (!doctorId) throw new AppError("Doctor profile not found", 404);
+
+      const page = Math.max(1, options.page ?? 1);
+      const take = Math.max(1, Math.min(50, options.limit ?? 10));
+      const skip = (page - 1) * take;
+
+      const where = {
+        doctorId,
+        status: ConsultationStatus.SCHEDULED,
+      };
+
+      const [total, items] = await Promise.all([
+        prisma.consultation.count({ where }),
+        prisma.consultation.findMany({
+          where,
+          orderBy: { scheduledStartTime: "asc" },
+          skip,
+          take,
+          include: {
+            patient: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phoneNumber: true,
+              },
+            },
+            slot: { select: { slotStartTime: true, slotEndTime: true } },
+          },
+        }),
+      ]);
+
+      return { page, limit: take, total, items };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to fetch pending consultations", 500);
+    }
+  }
+
+  // Get upcoming consultations (for both patient and doctor)
+  static async getUpcomingConsultations(
+    userId: string,
+    role: string,
+    options: { page?: number; limit?: number }
+  ) {
+    try {
+      const page = Math.max(1, options.page ?? 1);
+      const take = Math.max(1, Math.min(50, options.limit ?? 10));
+      const skip = (page - 1) * take;
+
+      const now = new Date();
+      let where: any = {
+        scheduledStartTime: { gte: now },
+        status: { in: [ConsultationStatus.SCHEDULED, ConsultationStatus.IN_PROGRESS] },
+      };
+
+      if (role === "PATIENT") {
+        where.patientId = userId;
+      } else if (role === "DOCTOR") {
+        const doctorId = await getDoctorIdByUserId(userId);
+        if (!doctorId) throw new AppError("Doctor profile not found", 404);
+        where.doctorId = doctorId;
+      } else {
+        throw new AppError("Invalid role", 400);
+      }
+
+      const [total, items] = await Promise.all([
+        prisma.consultation.count({ where }),
+        prisma.consultation.findMany({
+          where,
+          orderBy: { scheduledStartTime: "asc" },
+          skip,
+          take,
+          include: {
+            doctor: { select: { id: true, user: { select: { firstName: true, lastName: true } }, specialtyPrimary: true } },
+            patient: { select: { id: true, firstName: true, lastName: true } },
+          },
+        }),
+      ]);
+
+      return { page, limit: take, total, items };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to fetch upcoming consultations", 500);
+    }
+  }
+
+  // Get completed consultations
+  static async getCompletedConsultations(
+    userId: string,
+    role: string,
+    options: {
+      page?: number;
+      limit?: number;
+      startDate?: Date;
+      endDate?: Date;
+    }
+  ) {
+    try {
+      const page = Math.max(1, options.page ?? 1);
+      const take = Math.max(1, Math.min(50, options.limit ?? 10));
+      const skip = (page - 1) * take;
+
+      let where: any = { status: ConsultationStatus.COMPLETED };
+
+      if (role === "PATIENT") {
+        where.patientId = userId;
+      } else if (role === "DOCTOR") {
+        const doctorId = await getDoctorIdByUserId(userId);
+        if (!doctorId) throw new AppError("Doctor profile not found", 404);
+        where.doctorId = doctorId;
+      } else {
+        throw new AppError("Invalid role", 400);
+      }
+
+      if (options.startDate || options.endDate) {
+        where.actualEndTime = {};
+        if (options.startDate) where.actualEndTime.gte = options.startDate;
+        if (options.endDate) where.actualEndTime.lte = options.endDate;
+      }
+
+      const [total, items] = await Promise.all([
+        prisma.consultation.count({ where }),
+        prisma.consultation.findMany({
+          where,
+          orderBy: { actualEndTime: "desc" },
+          skip,
+          take,
+          include: {
+            doctor: { select: { id: true, user: { select: { firstName: true, lastName: true } }, specialtyPrimary: true } },
+            patient: { select: { id: true, firstName: true, lastName: true } },
+            prescriptions: { select: { id: true } },
+            review: true,
+          },
+        }),
+      ]);
+
+      return { page, limit: take, total, items };
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError("Failed to fetch completed consultations", 500);
+    }
+  }
 }
 

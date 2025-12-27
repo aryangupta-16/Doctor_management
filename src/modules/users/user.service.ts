@@ -45,6 +45,63 @@ export class UserService {
     }
   }
 
+  static async getUserById(userId: string) {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          phoneNumber: true,
+          firstName: true,
+          lastName: true,
+          dateOfBirth: true,
+          gender: true,
+          profilePicture: true,
+          emailVerified: true,
+          phoneVerified: true,
+          isActive: true,
+          role: true,
+          createdAt: true,
+          updatedAt: true,
+          profile: {
+            select: {
+              addressLine1: true,
+              addressLine2: true,
+              city: true,
+              state: true,
+              pincode: true,
+              country: true,
+              preferredLanguage: true
+            }
+          },
+          doctor: {
+            select: {
+              id: true,
+              specialtyPrimary: true,
+              specialtiesSecondary: true,
+              yearsOfExperience: true,
+              bio: true,
+              consultationFee: true,
+              averageRating: true,
+              totalConsultations: true,
+              isVerified: true
+            }
+          }
+        }
+      });
+
+      if (!user) {
+        throw new AppError('User not found', 404);
+      }
+
+      return user;
+    } catch (err: any) {
+      if (err instanceof AppError) throw err;
+      throw new AppError('Failed to fetch user', 500);
+    }
+  }
+
   static async updateProfile(userId: string, payload: Partial<{
     firstName: string;
     lastName: string;
