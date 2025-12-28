@@ -296,8 +296,8 @@ model Consultation {
   doctor                Doctor              @relation(fields: [doctorId], references: [id])
   
   // Slot Reference
-  slotId                String              @unique
-  slot                  AvailabilitySlot    @relation(fields: [slotId], references: [id])
+  slotId                String?             @unique
+  slot                  AvailabilitySlot?   @relation(fields: [slotId], references: [id])
   
   // Scheduling
   scheduledStartTime    DateTime

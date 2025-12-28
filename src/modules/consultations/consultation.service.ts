@@ -198,20 +198,29 @@ export default class ConsultationService {
       }
 
       const updated = await prisma.$transaction(async (tx) => {
+        // First, free up the slot if it exists
+        if (consultation.slotId) {
+          await tx.availabilitySlot.update({
+            where: { id: consultation.slotId },
+            data: { 
+              status: SlotStatus.AVAILABLE, 
+              consultationId: null, 
+              reservedByUserId: null, 
+              reservedAt: null, 
+              expiresAt: null 
+            },
+          });
+        }
+
+        // Then update consultation status and clear slotId to allow slot rebooking
         const cons = await tx.consultation.update({
           where: { id },
-          data: { status: ConsultationStatus.CANCELLED },
+          data: { 
+            status: ConsultationStatus.CANCELLED,
+            slotId: null // Clear slotId to remove unique constraint and allow rebooking
+          },
         });
 
-        if (cons.slotId) {
-          const slot = await tx.availabilitySlot.findUnique({ where: { id: cons.slotId } });
-          if (slot) {
-            await tx.availabilitySlot.update({
-              where: { id: slot.id },
-              data: { status: SlotStatus.AVAILABLE, consultationId: null, reservedByUserId: null, reservedAt: null, expiresAt: null },
-            });
-          }
-        }
         return cons;
       });
 
@@ -248,13 +257,21 @@ export default class ConsultationService {
       if (newSlot.doctorId !== consultation.doctorId) throw new AppError("Slot must belong to the same doctor", 400);
 
       const updated = await prisma.$transaction(async (tx) => {
+        // Free up the old slot
         if (consultation.slotId) {
           await tx.availabilitySlot.update({
             where: { id: consultation.slotId },
-            data: { status: SlotStatus.AVAILABLE, consultationId: null },
+            data: { 
+              status: SlotStatus.AVAILABLE, 
+              consultationId: null,
+              reservedByUserId: null,
+              reservedAt: null,
+              expiresAt: null
+            },
           });
         }
 
+        // Update consultation with new slot
         const cons = await tx.consultation.update({
           where: { id },
           data: {
@@ -265,9 +282,13 @@ export default class ConsultationService {
           },
         });
 
+        // Mark new slot as booked
         await tx.availabilitySlot.update({
           where: { id: newSlot.id },
-          data: { status: SlotStatus.BOOKED, consultationId: cons.id },
+          data: { 
+            status: SlotStatus.BOOKED, 
+            consultationId: cons.id 
+          },
         });
 
         return cons;

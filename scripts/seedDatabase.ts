@@ -16,11 +16,17 @@ import { hashPassword } from '../src/utils/password';
 
 const prisma = new PrismaClient();
 
-// ---------- Helpers ----------
+// ============================================
+// CONFIGURATION
+// ============================================
 
-const randomEnumValue = <T extends object>(anEnum: T): T[keyof T] => {
-  const values = Object.values(anEnum) as T[keyof T][];
-  return values[Math.floor(Math.random() * values.length)];
+const SEED_CONFIG = {
+  ADMIN_COUNT: 1,
+  PATIENT_COUNT: 10,
+  DOCTOR_COUNT: 5,
+  CONSULTATION_COUNT: 20,
+  SLOT_DAYS_AHEAD: 14,
+  PASSWORD: 'password',
 };
 
 const SPECIALTIES = [
@@ -34,50 +40,84 @@ const SPECIALTIES = [
   'Ophthalmology',
   'ENT',
   'Dentistry',
+  'Psychiatry',
+  'Endocrinology',
 ];
 
-// ---------- Seeding pieces ----------
+const INDIAN_CITIES = [
+  'Mumbai',
+  'Delhi',
+  'Bangalore',
+  'Hyderabad',
+  'Chennai',
+  'Kolkata',
+  'Pune',
+  'Ahmedabad',
+  'Jaipur',
+  'Lucknow',
+];
+
+// ============================================
+// HELPERS
+// ============================================
+
+const randomEnumValue = <T extends object>(anEnum: T): T[keyof T] => {
+  const values = Object.values(anEnum) as T[keyof T][];
+  return values[Math.floor(Math.random() * values.length)];
+};
+
+const log = (message: string) => console.log(`  ${message}`);
+const logSection = (message: string) => console.log(`\n🔹 ${message}`);
+
+// ============================================
+// DATABASE CLEARING
+// ============================================
 
 async function clearDatabase() {
-  // Respect FK constraints; delete in dependency order
-  await prisma.analytics.deleteMany();
-  await prisma.auditLog.deleteMany();
-  await prisma.notification.deleteMany();
-  await prisma.review.deleteMany();
-  await prisma.payment.deleteMany();
-  await prisma.prescription.deleteMany();
-  await prisma.consultation.deleteMany();
-  await prisma.availabilitySlot.deleteMany();
-  await prisma.doctorAvailability.deleteMany();
-  await prisma.doctor.deleteMany();
-  await prisma.userSession.deleteMany();
-  await prisma.userProfile.deleteMany();
-  await prisma.user.deleteMany();
+  log('Clearing existing data...');
+  const tables = [
+    'analytics',
+    'auditLog',
+    'notification',
+    'review',
+    'payment',
+    'prescription',
+    'consultation',
+    'availabilitySlot',
+    'doctorAvailability',
+    'doctor',
+    'userSession',
+    'userProfile',
+    'user',
+  ];
+
+  for (const table of tables) {
+    await (prisma as any)[table].deleteMany();
+  }
+  log('✓ Database cleared');
 }
 
+// ============================================
+// USER CREATION
+// ============================================
+
 async function createUsers(count: number, role: RoleType, hashedPassword: string) {
-  const users: Awaited<ReturnType<typeof prisma.user.create>>[] = [];
+  const users = [];
 
   for (let i = 0; i < count; i++) {
     const firstName = faker.person.firstName();
     const lastName = faker.person.lastName();
+    const city = faker.helpers.arrayElement(INDIAN_CITIES);
 
     const user = await prisma.user.create({
       data: {
-        email: faker.internet
-          .email({
-            firstName,
-            lastName,
-            provider: 'example.com',
-          })
-          .toLowerCase(),
-        phoneNumber: `+91${faker.number.int({ min: 6000000000, max: 9999999999 })}`,
+        email: `${firstName.toLowerCase()}.${lastName.toLowerCase()}.${i}@example.com`,
+        phoneNumber: `+91${faker.number.int({ min: 7000000000, max: 9999999999 })}`,
         passwordHash: hashedPassword,
         firstName,
         lastName,
-        dateOfBirth: faker.date.birthdate({ min: 18, max: 80, mode: 'age' }),
+        dateOfBirth: faker.date.birthdate({ min: 18, max: 70, mode: 'age' }),
         gender: randomEnumValue(Gender),
-        profilePicture: null,
         emailVerified: true,
         phoneVerified: true,
         isActive: true,
@@ -85,53 +125,15 @@ async function createUsers(count: number, role: RoleType, hashedPassword: string
         profile: {
           create: {
             addressLine1: faker.location.streetAddress(),
-            addressLine2: faker.datatype.boolean() ? faker.location.streetAddress() : null,
-            city: faker.location.city(),
+            city,
             state: faker.location.state(),
             pincode: faker.location.zipCode('######'),
             country: 'India',
-            bloodGroup: faker.helpers.arrayElement([
-              'A+',
-              'A-',
-              'B+',
-              'B-',
-              'O+',
-              'O-',
-              'AB+',
-              'AB-',
-            ]),
-            height: faker.number.float({ min: 140, max: 190, fractionDigits: 1 }),
-            weight: faker.number.float({ min: 50, max: 110, fractionDigits: 1 }),
-            allergies: [
-              {
-                name: 'Dust',
-                severity: 'mild',
-              },
-            ],
-            chronicConditions: [
-              {
-                name: 'Hypertension',
-                since: '2018-01-01',
-              },
-            ],
-            currentMedications: [
-              {
-                name: 'Atorvastatin',
-                dose: '10mg',
-              },
-            ],
-            emergencyContactName: faker.person.fullName(),
-            emergencyContactPhone: `+91${faker.number.int({
-              min: 6000000000,
-              max: 9999999999,
-            })}`,
-            emergencyContactRelation: 'Family',
+            bloodGroup: faker.helpers.arrayElement(['A+', 'A-', 'B+', 'B-', 'O+', 'O-', 'AB+', 'AB-']),
+            height: faker.number.float({ min: 150, max: 185, fractionDigits: 1 }),
+            weight: faker.number.float({ min: 45, max: 100, fractionDigits: 1 }),
             preferredLanguage: 'English',
-            notificationPreferences: {
-              email: true,
-              sms: true,
-              push: true,
-            },
+            notificationPreferences: { email: true, sms: true, push: true },
           },
         },
       },
@@ -143,67 +145,87 @@ async function createUsers(count: number, role: RoleType, hashedPassword: string
   return users;
 }
 
-async function createDoctors(doctorUsers: Awaited<ReturnType<typeof prisma.user.create>>[]) {
-  const doctors: Awaited<ReturnType<typeof prisma.doctor.create>>[] = [];
+// ============================================
+// DOCTOR CREATION
+// ============================================
 
+async function createDoctors(users: Awaited<ReturnType<typeof createUsers>>) {
+  logSection('DOCTORS');
+  const doctors = [];
+
+  // Create 5 doctor users first
+  const hashedPassword = await hashPassword(SEED_CONFIG.PASSWORD);
+  const doctorUsers = [];
+
+  for (let i = 0; i < SEED_CONFIG.DOCTOR_COUNT; i++) {
+    const firstName = faker.person.firstName();
+    const lastName = faker.person.lastName();
+
+    const doctorUser = await prisma.user.create({
+      data: {
+        email: `dr.${firstName.toLowerCase()}.${lastName.toLowerCase()}@example.com`,
+        phoneNumber: `+91${faker.number.int({ min: 7000000000, max: 9999999999 })}`,
+        passwordHash: hashedPassword,
+        firstName,
+        lastName,
+        dateOfBirth: faker.date.birthdate({ min: 30, max: 60, mode: 'age' }),
+        gender: randomEnumValue(Gender),
+        role: RoleType.DOCTOR,
+        emailVerified: true,
+        phoneVerified: true,
+        isActive: true,
+      },
+    });
+
+    doctorUsers.push(doctorUser);
+  }
+
+  // Create doctor profiles
   for (const user of doctorUsers) {
-    const primary = faker.helpers.arrayElement(SPECIALTIES);
-    const secondary = faker.helpers
-      .arrayElements(
-        SPECIALTIES.filter((s) => s !== primary),
-        { min: 1, max: 3 },
-      )
-      .filter((v, i, a) => a.indexOf(v) === i);
+    const specialty = faker.helpers.arrayElement(SPECIALTIES);
+    const experience = faker.number.int({ min: 2, max: 25 });
 
     const doctor = await prisma.doctor.create({
       data: {
         userId: user.id,
-        licenseNumber: `MED${faker.number.int({ min: 10000, max: 99999 })}`,
-        specialtyPrimary: primary,
-        specialtiesSecondary: secondary,
-        yearsOfExperience: faker.number.int({ min: 1, max: 30 }),
+        licenseNumber: `MED${faker.number.int({ min: 100000, max: 999999 })}`,
+        specialtyPrimary: specialty,
+        specialtiesSecondary: faker.helpers.arrayElements(
+          SPECIALTIES.filter((s) => s !== specialty),
+          { min: 0, max: 2 }
+        ),
+        yearsOfExperience: experience,
         education: [
-          {
-            degree: 'MBBS',
-            college: `${faker.location.city()} Medical College`,
-            year: faker.date.past({ years: 20 }).getFullYear(),
-          },
+          { degree: 'MBBS', college: `${faker.location.city()} Medical College`, year: 2024 - experience - 5 },
         ],
-        certifications: [
-          {
-            name: 'Medical Council Registration',
-            year: faker.date.past({ years: 10 }).getFullYear(),
-          },
-        ],
-        bio: faker.lorem.paragraphs(2),
-        consultationFee: faker.number.int({ min: 300, max: 2000, multipleOf: 50 }),
-        consultationDuration: faker.helpers.arrayElement([15, 30, 45, 60]),
-        languagesSpoken: [
-          'English',
-          'Hindi',
-          ...faker.helpers.arrayElements(
-            ['Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Bengali', 'Marathi', 'Gujarati'],
-            { min: 0, max: 2 },
-          ),
-        ],
+        certifications: [{ name: 'Medical Council Registration', year: 2024 - experience }],
+        bio: `Experienced ${specialty} specialist with ${experience} years of practice.`,
+        consultationFee: faker.number.int({ min: 500, max: 2000, multipleOf: 100 }),
+        consultationDuration: 30,
+        languagesSpoken: ['English', 'Hindi'],
         isVerified: true,
         verifiedAt: new Date(),
-        verifiedBy: 'system',
         isActive: true,
-        averageRating: faker.number.float({ min: 3, max: 5, fractionDigits: 1 }),
-        totalConsultations: faker.number.int({ min: 10, max: 500 }),
-        totalReviews: faker.number.int({ min: 5, max: 200 }),
+        averageRating: faker.number.float({ min: 4.0, max: 5.0, fractionDigits: 1 }),
+        totalConsultations: faker.number.int({ min: 50, max: 500 }),
+        totalReviews: faker.number.int({ min: 20, max: 200 }),
       },
     });
 
     doctors.push(doctor);
   }
 
+  log(`✓ Created ${doctors.length} doctors`);
   return doctors;
 }
 
+// ============================================
+// AVAILABILITY & SLOTS
+// ============================================
+
 async function createAvailabilityAndSlots(doctorId: string) {
-  const workingDays = [1, 2, 3, 4, 5]; // Mon–Fri
+  // Create weekly availability (Mon-Fri, 9 AM - 5 PM)
+  const workingDays = [1, 2, 3, 4, 5];
 
   for (const dayOfWeek of workingDays) {
     await prisma.doctorAvailability.create({
@@ -217,42 +239,54 @@ async function createAvailabilityAndSlots(doctorId: string) {
     });
   }
 
-  // Generate slots for next 7 days
+  // Generate slots for next 14 days
   const today = new Date();
-  for (let offset = 0; offset < 7; offset++) {
-    const date = new Date(today);
-    date.setDate(today.getDate() + offset);
+  today.setHours(0, 0, 0, 0);
 
-    // Skip Sunday (0) and Saturday (6)
-    if (date.getDay() === 0 || date.getDay() === 6) continue;
+  for (let dayOffset = 0; dayOffset < SEED_CONFIG.SLOT_DAYS_AHEAD; dayOffset++) {
+    const slotDate = new Date(today);
+    slotDate.setDate(today.getDate() + dayOffset);
 
+    // Skip weekends
+    if (slotDate.getDay() === 0 || slotDate.getDay() === 6) continue;
+
+    // Create 30-minute slots from 9 AM to 5 PM
     for (let hour = 9; hour < 17; hour++) {
-      const slotStart = new Date(date);
-      slotStart.setHours(hour, 0, 0, 0);
+      for (let minute = 0; minute < 60; minute += 30) {
+        const slotStart = new Date(slotDate);
+        slotStart.setHours(hour, minute, 0, 0);
 
-      const slotEnd = new Date(slotStart);
-      slotEnd.setMinutes(slotStart.getMinutes() + 30);
+        const slotEnd = new Date(slotStart);
+        slotEnd.setMinutes(slotEnd.getMinutes() + 30);
 
-      await prisma.availabilitySlot.create({
-        data: {
-          doctorId,
-          slotStartTime: slotStart,
-          slotEndTime: slotEnd,
-          status: SlotStatus.AVAILABLE,
-        },
-      });
+        await prisma.availabilitySlot.create({
+          data: {
+            doctorId,
+            slotStartTime: slotStart,
+            slotEndTime: slotEnd,
+            status: SlotStatus.AVAILABLE,
+          },
+        });
+      }
     }
   }
 }
+
+// ============================================
+// CONSULTATIONS, PAYMENTS & REVIEWS
+// ============================================
 
 async function createConsultationsAndPaymentsAndReviews(
   patients: Awaited<ReturnType<typeof createUsers>>,
   doctors: Awaited<ReturnType<typeof createDoctors>>,
 ) {
+  log('Creating 20 consultations with payments and reviews...');
+
   for (let i = 0; i < 20; i++) {
     const patient = faker.helpers.arrayElement(patients);
     const doctor = faker.helpers.arrayElement(doctors);
 
+    // Find next available slot
     const slot = await prisma.availabilitySlot.findFirst({
       where: {
         doctorId: doctor.id,
@@ -264,33 +298,37 @@ async function createConsultationsAndPaymentsAndReviews(
 
     if (!slot) continue;
 
-    // Mark slot as booked
+    // Book the slot
     await prisma.availabilitySlot.update({
       where: { id: slot.id },
       data: { status: SlotStatus.BOOKED },
     });
 
-    const scheduledStartTime = slot.slotStartTime;
-    const scheduledEndTime = slot.slotEndTime;
-
+    // Create consultation
     const consultation = await prisma.consultation.create({
       data: {
         consultationNumber: `CONS${faker.number.int({ min: 100000, max: 999999 })}`,
         patientId: patient.id,
         doctorId: doctor.id,
         slotId: slot.id,
-        scheduledStartTime,
-        scheduledEndTime,
+        scheduledStartTime: slot.slotStartTime,
+        scheduledEndTime: slot.slotEndTime,
         consultationType: randomEnumValue(ConsultationType),
         status: ConsultationStatus.SCHEDULED,
         consultationFee: doctor.consultationFee,
-        chiefComplaint: faker.lorem.sentence(),
+        chiefComplaint: faker.helpers.arrayElement([
+          'Routine checkup',
+          'Fever and cold',
+          'Back pain',
+          'Headache',
+          'Annual physical',
+        ]),
         symptoms: [faker.lorem.words(3), faker.lorem.words(2)],
         diagnosis: faker.datatype.boolean() ? faker.lorem.sentence() : null,
         doctorNotes: faker.datatype.boolean() ? faker.lorem.paragraph() : null,
         followUpRequired: faker.datatype.boolean(),
         followUpDate: faker.datatype.boolean()
-          ? faker.date.soon({ days: 30, refDate: scheduledEndTime })
+          ? faker.date.soon({ days: 30, refDate: slot.slotEndTime })
           : null,
         meetingLink: faker.internet.url(),
         recordingUrl: null,
@@ -300,8 +338,8 @@ async function createConsultationsAndPaymentsAndReviews(
       },
     });
 
-    // Payment
-    const paymentCompleted = faker.datatype.boolean();
+    // Create payment (80% completed)
+    const paymentCompleted = Math.random() > 0.2;
     await prisma.payment.create({
       data: {
         transactionNumber: `PAY${faker.number.int({ min: 100000, max: 999999 })}`,
@@ -313,9 +351,7 @@ async function createConsultationsAndPaymentsAndReviews(
         status: paymentCompleted ? PaymentStatus.COMPLETED : PaymentStatus.PENDING,
         gatewayName: 'Razorpay',
         gatewayTransactionId: paymentCompleted ? `RZP_${faker.string.alphanumeric(12)}` : null,
-        gatewayResponse: {
-          success: paymentCompleted,
-        },
+        gatewayResponse: { success: paymentCompleted },
         refundAmount: null,
         refundReason: null,
         refundedAt: null,
@@ -325,7 +361,7 @@ async function createConsultationsAndPaymentsAndReviews(
       },
     });
 
-    // Review (only for completed/paid consultations) – simplified
+    // Create review (50% of paid consultations get reviewed)
     if (paymentCompleted && faker.datatype.boolean()) {
       const rating = faker.number.int({ min: 3, max: 5 });
 
@@ -335,102 +371,72 @@ async function createConsultationsAndPaymentsAndReviews(
           patientId: patient.id,
           doctorId: doctor.id,
           rating,
-          comment: faker.lorem.sentences(2),
+          comment: faker.helpers.arrayElement([
+            'Excellent doctor, very helpful!',
+            'Good consultation, satisfied with treatment.',
+            'Professional and caring.',
+            'Helpful advice and clear explanations.',
+          ]),
           isAnonymous: faker.datatype.boolean(),
           isVerified: true,
         },
       });
-
-      await prisma.doctor.update({
-        where: { id: doctor.id },
-        data: {
-          totalReviews: { increment: 1 },
-          totalConsultations: { increment: 1 },
-          averageRating: rating,
-        },
-      });
     }
+  }
+}
 
-    // Notification to patient
-    await prisma.notification.create({
-      data: {
-        userId: patient.id,
-        type: NotificationType.IN_APP,
-        status: NotificationStatus.SENT,
-        title: 'Consultation Booked',
-        message: `Your consultation ${consultation.consultationNumber} is scheduled.`,
-        data: {
-          consultationId: consultation.id,
-          doctorId: doctor.id,
-        },
-        sentAt: new Date(),
-        readAt: null,
-      },
+// ============================================
+// ANALYTICS
+// ============================================
+
+async function createDoctorAnalytics(doctors: Awaited<ReturnType<typeof createDoctors>>) {
+  log('Creating analytics data for doctors...');
+
+  for (const doctor of doctors) {
+    const consultationsCount = await prisma.consultation.count({
+      where: { doctorId: doctor.id },
     });
 
-    // Audit log
-    await prisma.auditLog.create({
+    const reviewsCount = await prisma.review.count({
+      where: { doctorId: doctor.id },
+    });
+
+    const avgRatingResult = await prisma.review.aggregate({
+      where: { doctorId: doctor.id },
+      _avg: { rating: true },
+    });
+
+    await prisma.doctor.update({
+      where: { id: doctor.id },
       data: {
-        userId: patient.id,
-        action: AuditAction.CREATE,
-        entityType: 'Consultation',
-        entityId: consultation.id,
-        ipAddress: faker.internet.ip(),
-        userAgent: faker.internet.userAgent(),
-        changes: {
-          created: true,
-        },
-        metadata: {
-          source: 'seed',
-        },
+        totalConsultations: consultationsCount,
+        totalReviews: reviewsCount,
+        averageRating: avgRatingResult._avg.rating || 0,
       },
     });
   }
 }
 
-async function createAnalytics() {
-  const today = new Date();
-  for (let offset = 0; offset < 7; offset++) {
-    const date = new Date(today);
-    date.setDate(today.getDate() - offset);
-
-    await prisma.analytics.createMany({
-      data: [
-        {
-          metricName: 'daily_consultations',
-          metricValue: faker.number.float({ min: 10, max: 100, fractionDigits: 0 }),
-          dimensions: {},
-          date,
-        },
-        {
-          metricName: 'daily_revenue',
-          metricValue: faker.number.float({ min: 10000, max: 100000, fractionDigits: 2 }),
-          dimensions: { currency: 'INR' },
-          date,
-        },
-      ],
-      skipDuplicates: true,
-    });
-  }
-}
-
-// ---------- Main ----------
+// ============================================
+// MAIN SEED FUNCTION
+// ============================================
 
 async function main() {
-  console.log('🌱 Starting database seeding...');
+  console.log('\n' + '='.repeat(50));
+  console.log('🌱 Starting Database Seed Process');
+  console.log('='.repeat(50) + '\n');
 
-  console.log('🧹 Clearing existing data...');
+  const hashedPassword = await hashPassword(SEED_CONFIG.PASSWORD);
+
   await clearDatabase();
 
-  // Hash seed password once
-  const HASHED_PASSWORD = await hashPassword('password');
-
-  console.log('👨‍💼 Creating admin user...');
+  // Create admin user
+  logSection('ADMIN');
   await prisma.user.create({
     data: {
       email: 'admin@example.com',
       phoneNumber: '+919876543210',
-      passwordHash: HASHED_PASSWORD,
+      passwordHash: hashedPassword,
       firstName: 'Admin',
       lastName: 'User',
       role: RoleType.ADMIN,
@@ -439,26 +445,28 @@ async function main() {
       isActive: true,
     },
   });
+  log('✓ Admin user created');
 
-  console.log('👥 Creating patients...');
-  const patients = await createUsers(10, RoleType.PATIENT, HASHED_PASSWORD);
+  const users = await createUsers(SEED_CONFIG.PATIENT_COUNT, RoleType.PATIENT, hashedPassword);
+  const doctors = await createDoctors(users);
 
-  console.log('👨‍⚕️ Creating doctors...');
-  const doctorUsers = await createUsers(5, RoleType.DOCTOR, HASHED_PASSWORD);
-  const doctors = await createDoctors(doctorUsers);
-
-  console.log('📅 Creating availability & slots...');
+  logSection('AVAILABILITY & SLOTS');
+  log('Generating availability and time slots for doctors...');
   for (const doctor of doctors) {
     await createAvailabilityAndSlots(doctor.id);
   }
 
-  console.log('📝 Creating consultations, payments, reviews, notifications, audit logs...');
-  await createConsultationsAndPaymentsAndReviews(patients, doctors);
+  await createConsultationsAndPaymentsAndReviews(users, doctors);
+  await createDoctorAnalytics(doctors);
 
-  console.log('📊 Creating analytics metrics...');
-  await createAnalytics();
-
-  console.log('✅ Database seeded successfully!');
+  console.log('\n' + '='.repeat(50));
+  console.log('✅ Database Seeding Completed Successfully!');
+  console.log('='.repeat(50));
+  console.log(`📊 Summary:`);
+  console.log(`   - Users: ${users.length} patients`);
+  console.log(`   - Doctors: ${doctors.length}`);
+  console.log(`   - Consultations: 20 with payments & reviews`);
+  console.log(`   - Slots: Generated for next ${SEED_CONFIG.SLOT_DAYS_AHEAD} days\n`);
 }
 
 main()
