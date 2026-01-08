@@ -28,7 +28,7 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/package.json ./package.json
-COPY .env ./
+
 # Copy generated Prisma Client from build stage
 COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=build /app/node_modules/@prisma ./node_modules/@prisma
