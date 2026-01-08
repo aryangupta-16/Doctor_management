@@ -6,6 +6,8 @@ COPY package.json ./
 RUN npm i
 
 FROM base AS build
+RUN apt-get update -y && apt-get install -y openssl
+
 COPY package.json ./
 RUN npm i
 
@@ -18,6 +20,7 @@ RUN npx prisma generate
 RUN npx tsc --outDir dist --rootDir src
 
 FROM node:20-slim AS production
+RUN apt-get update -y && apt-get install -y openssl
 
 ENV NODE_ENV=production
 ENV PORT=8000
