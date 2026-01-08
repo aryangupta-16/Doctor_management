@@ -2,17 +2,16 @@ FROM node:20-slim AS base
 WORKDIR /app
 
 FROM base AS deps
-COPY package.json package-lock.json ./
-RUN npm ci --only=production && \
-    npm cache clean --force
+COPY package.json ./
+RUN npm i
 
 FROM base AS build
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json ./
+RUN npm i
 
 COPY tsconfig.json ./
 COPY src ./src
-COPY prisma ./prisma
+COPY prisma ./prisma 
 
 RUN npx prisma generate
 

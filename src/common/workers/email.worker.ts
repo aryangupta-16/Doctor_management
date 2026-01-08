@@ -1,10 +1,7 @@
 import { Worker } from "bullmq";
-import { Redis } from "ioredis";
 import { logger } from "../../config/logger";
 import { emailService } from "../../lib/mailer";
 import { config } from "../../config";
-
-const connection = new Redis(config.redisUrl!);
 
 const worker = new Worker(
   "email-queue",
@@ -37,7 +34,16 @@ const worker = new Worker(
         break;
     }
   },
-  { connection }
+  {
+    connection: {
+      host: config.redisUrl!.includes('://') 
+        ? new URL(config.redisUrl!).hostname 
+        : config.redisUrl!.split(':')[0],
+      port: config.redisUrl!.includes('://') 
+        ? parseInt(new URL(config.redisUrl!).port || '6379')
+        : parseInt(config.redisUrl!.split(':')[1] || '6379'),
+    }
+  }
 );
 
 worker.on("completed", job => {
