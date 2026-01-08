@@ -2,12 +2,9 @@ import { Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { logger } from "../../config/logger";
 import { emailService } from "../../lib/mailer";
+import { config } from "../../config";
 
-const connection = new Redis({
-  host: "127.0.0.1",
-  port: 6379,
-  maxRetriesPerRequest: null,
-});
+const connection = new Redis(config.redisUrl!);
 
 const worker = new Worker(
   "email-queue",

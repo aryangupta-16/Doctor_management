@@ -27,7 +27,7 @@ export const config = {
     from: process.env.TWILIO_FROM,
   },
 
-  redisUrl: process.env.REDIS_URL || 'redis://127.0.0.1:6379',
+  redisUrl: process.env.REDIS_URL,
 
   appBaseUrl: process.env.APP_BASE_URL || 'http://localhost:3000',
 };

@@ -3,7 +3,6 @@ import { Prisma, RoleType } from '@prisma/client';
 import { hashPassword, comparePassword } from '../../utils/password';
 import { signAccessToken, signRefreshToken, signEmailToken, signResetToken, verifyToken } from '../../utils/jwt';
 import { config } from '../../config';
-import redis from '../../lib/redis';
 // import { sendEmail } from '../../lib/mailer';
 import { emailProducer } from '../../common/queue/email.producer.service';
 import { v4 as uuidv4 } from 'uuid';
